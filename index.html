@@ -1,0 +1,2065 @@
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>NJZ Star Maze</title>
+
+  <style>
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+    }
+
+    body {
+      margin: 0;
+      background: #06000f;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      overflow: hidden;
+      font-family: monospace;
+    }
+
+    .game-wrap {
+      position: relative;
+      width: 648px;
+      height: 648px;
+      flex: 0 0 auto;
+    }
+
+    canvas {
+      display: block;
+      border: 4px solid white;
+      image-rendering: pixelated;
+      box-shadow:
+        0 0 18px #ff5cf4,
+        0 0 36px #8b5cff;
+    }
+
+    .home-button {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      display: none;
+      width: 42px;
+      height: 42px;
+      border: 2px solid white;
+      background: rgba(28, 0, 48, 0.84);
+      cursor: pointer;
+      box-shadow:
+        0 0 10px #ff5cf4,
+        inset 0 0 8px rgba(255, 92, 244, 0.4);
+      image-rendering: pixelated;
+    }
+
+    .home-button:hover {
+      background: rgba(255, 92, 244, 0.5);
+      box-shadow:
+        0 0 14px white,
+        0 0 18px #ff5cf4;
+    }
+
+    .home-button::before {
+      content: "";
+      position: absolute;
+      left: 7px;
+      top: 6px;
+      width: 4px;
+      height: 4px;
+      background: transparent;
+      box-shadow:
+        12px 0 #1a0030,
+        16px 0 #1a0030,
+        8px 4px #1a0030,
+        12px 4px white,
+        16px 4px white,
+        20px 4px #1a0030,
+        4px 8px #1a0030,
+        8px 8px white,
+        12px 8px white,
+        16px 8px white,
+        20px 8px white,
+        24px 8px #1a0030,
+        0 12px #1a0030,
+        4px 12px white,
+        8px 12px white,
+        12px 12px white,
+        16px 12px white,
+        20px 12px white,
+        24px 12px white,
+        28px 12px #1a0030,
+        4px 16px #1a0030,
+        8px 16px white,
+        12px 16px white,
+        16px 16px white,
+        20px 16px white,
+        24px 16px #1a0030,
+        4px 20px #1a0030,
+        8px 20px white,
+        12px 20px #1a0030,
+        16px 20px #1a0030,
+        20px 20px white,
+        24px 20px #1a0030,
+        4px 24px #1a0030,
+        8px 24px white,
+        12px 24px #1a0030,
+        16px 24px #1a0030,
+        20px 24px white,
+        24px 24px #1a0030,
+        4px 28px #1a0030,
+        8px 28px #1a0030,
+        12px 28px #1a0030,
+        16px 28px #1a0030,
+        20px 28px #1a0030,
+        24px 28px #1a0030;
+      filter: drop-shadow(0 0 5px white);
+    }
+  </style>
+</head>
+
+<body>
+  <div class="game-wrap">
+    <canvas id="game" width="640" height="640"></canvas>
+    <button class="home-button" id="homeButton" aria-label="Pause"></button>
+  </div>
+
+  <script src="levels.js"></script>
+  <script>
+    const canvas = document.getElementById("game");
+    const ctx = canvas.getContext("2d");
+    const homeButton = document.getElementById("homeButton");
+    const levels = window.LEVELS;
+
+    const TILE_SIZE = 40;
+    const GRID_COLS = canvas.width / TILE_SIZE;
+    const GRID_ROWS = canvas.height / TILE_SIZE;
+    const WALL = 1;
+    const PATH = 0;
+
+    // 只影响碰撞，不影响墙体视觉绘制。
+    const WALL_COLLISION_PADDING = 4;
+    const PLAYER_HITBOX_PADDING = 4;
+    const ENEMY_HITBOX_PADDING = 3;
+
+    const LASER_COOLDOWN = 600;
+    const LASER_DURATION = 10;
+    const PIG_RESPAWN_TIME = 240;
+    const DEBUG_MODE = true;
+
+    const player = {
+      x: TILE_SIZE + 4,
+      y: TILE_SIZE + 4,
+      startX: TILE_SIZE + 4,
+      startY: TILE_SIZE + 4,
+      size: 32,
+      speed: 4
+    };
+
+        const pigHome = {
+      spawnTiles: [
+        { col: 7, row: 7 },
+        { col: 8, row: 7 },
+        { col: 7, row: 8 },
+        { col: 8, row: 8 }
+      ],
+      exitTile: { col: 8, row: 9 },
+      protectedTiles: [
+        { col: 6, row: 6 },
+        { col: 7, row: 6 },
+        { col: 8, row: 6 },
+        { col: 9, row: 6 },
+
+        { col: 6, row: 7 },
+        { col: 7, row: 7 },
+        { col: 8, row: 7 },
+        { col: 9, row: 7 },
+
+        { col: 6, row: 8 },
+        { col: 7, row: 8 },
+        { col: 8, row: 8 },
+        { col: 9, row: 8 },
+
+        { col: 6, row: 9 },
+        { col: 7, row: 9 },
+        { col: 8, row: 9 },
+        { col: 9, row: 9 },
+
+        { col: 8, row: 10 }
+      ]
+    };
+
+    let currentFrame = 0;
+    let frameTimer = 0;
+    let score = 0;
+    let lives = 3;
+    let invincibleTimer = 0;
+    let gameState = "start";
+    let stars = [];
+    let enemies = [];
+    let lasers = [];
+    let maze = [];
+    let currentLevelIndex = 0;
+    let selectedDifficulty = 0;
+    let selectedStartOption = 0;
+    let selectedLevelOption = 0;
+    let debugLevelSelectMode = false;
+    let selectedPauseOption = 0;
+    let selectedCharacterIndex = 0;
+    let previewCharacterIndex = 0;
+    let laserCooldown = 0;
+    let laserShotsRemaining = 0;
+    let facingDirection = { dx: 1, dy: 0 };
+    let hardRulesShown = false;
+    let levelIntroNextState = "playing";
+
+    const difficulties = [
+      { name: "EASY", stars: 10, enemies: 1, wallChance: 0.18, blockCount: 12 },
+      { name: "NORMAL", stars: 18, enemies: 3, wallChance: 0.25, blockCount: 18 },
+      { name: "HARD", stars: 28, enemies: 5, wallChance: 0.32, blockCount: 26 }
+    ];
+
+    const pauseOptions = [
+      "Continue Game",
+      "Back to Main Menu"
+    ];
+
+    const startOptions = [
+      { label: "开始冒险", action: "startAdventure" },
+      { label: "选择角色", action: "characterSelect" },
+      { label: "继续游戏", action: "continueGame", available: false }
+    ];
+
+    const characterImages = [
+      "assets/characters/character-1.png",
+      "assets/characters/character-2.png",
+      "assets/characters/character-3.png",
+      "assets/characters/character-4.png",
+      "assets/characters/character-5.png"
+    ].map(src => {
+      const image = new Image();
+      image.src = src;
+      return image;
+    });
+
+    const keys = {};
+
+    window.addEventListener("keydown", (e) => {
+      if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter", "Escape", " "].includes(e.key)) {
+        e.preventDefault();
+      }
+
+      keys[e.key] = true;
+
+      if (gameState === "playing" && !e.repeat) {
+        if (e.key === "ArrowUp") facingDirection = { dx: 0, dy: -1 };
+        if (e.key === "ArrowDown") facingDirection = { dx: 0, dy: 1 };
+        if (e.key === "ArrowLeft") facingDirection = { dx: -1, dy: 0 };
+        if (e.key === "ArrowRight") facingDirection = { dx: 1, dy: 0 };
+      }
+
+      if (gameState === "start" && !e.repeat) {
+        if (e.key === "ArrowUp") {
+          selectedStartOption =
+            (selectedStartOption - 1 + startOptions.length) %
+            startOptions.length;
+        }
+
+        if (e.key === "ArrowDown") {
+          selectedStartOption =
+            (selectedStartOption + 1) %
+            startOptions.length;
+        }
+
+        if (e.key === "Enter") {
+          const selectedOption = startOptions[selectedStartOption];
+
+          if (selectedOption.action === "startAdventure") {
+            selectedLevelOption = 0;
+            debugLevelSelectMode = false;
+            gameState = "levelSelect";
+          } else if (selectedOption.action === "characterSelect") {
+            previewCharacterIndex = selectedCharacterIndex;
+            gameState = "characterSelect";
+          }
+        }
+      } else if (gameState === "levelSelect" && !e.repeat) {
+        if (DEBUG_MODE && isDebugLevelShortcutPressed()) {
+          debugLevelSelectMode = true;
+          return;
+        }
+
+        if (e.key === "ArrowLeft") {
+          selectedLevelOption =
+            (selectedLevelOption - 1 + levels.length) %
+            levels.length;
+        }
+
+        if (e.key === "ArrowRight") {
+          selectedLevelOption =
+            (selectedLevelOption + 1) %
+            levels.length;
+        }
+
+        if (e.key === "ArrowUp") {
+          selectedLevelOption =
+            (selectedLevelOption - 5 + levels.length) %
+            levels.length;
+        }
+
+        if (e.key === "ArrowDown") {
+          selectedLevelOption =
+            (selectedLevelOption + 5) %
+            levels.length;
+        }
+
+        if (
+          e.key === "Enter" &&
+          (
+            debugLevelSelectMode ||
+            isLevelUnlocked(selectedLevelOption)
+          )
+        ) {
+          currentLevelIndex = selectedLevelOption;
+          hardRulesShown = false;
+          startGame();
+        }
+
+        if (e.key === "Escape") {
+          debugLevelSelectMode = false;
+          gameState = "start";
+        }
+      } else if (gameState === "characterSelect" && !e.repeat) {
+        if (e.key === "ArrowLeft") {
+          previewCharacterIndex = (previewCharacterIndex - 1 + characterImages.length) % characterImages.length;
+        }
+
+        if (e.key === "ArrowRight") {
+          previewCharacterIndex = (previewCharacterIndex + 1) % characterImages.length;
+        }
+
+        if (e.key === "Enter") {
+          selectedCharacterIndex = previewCharacterIndex;
+          gameState = "start";
+        }
+
+        if (e.key === "Escape") {
+          previewCharacterIndex = selectedCharacterIndex;
+          gameState = "start";
+        }
+      } else if (gameState === "hardRules" && e.key === " " && !e.repeat) {
+        gameState = "playing";
+        hardRulesShown = true;
+        clearArrowKeys();
+      } else if (gameState === "levelIntro" && e.key === "Enter" && !e.repeat) {
+        gameState = levelIntroNextState;
+        clearArrowKeys();
+      } else if (gameState === "playing" && e.key === "Enter" && !e.repeat) {
+        pauseGame();
+      } else if (gameState === "playing" && e.key === " " && !e.repeat) {
+        fireLaser();
+      } else if (gameState === "paused" && !e.repeat) {
+        if (e.key === "ArrowUp") {
+          selectedPauseOption =
+            (selectedPauseOption - 1 + pauseOptions.length) % pauseOptions.length;
+        }
+
+        if (e.key === "ArrowDown") {
+          selectedPauseOption = (selectedPauseOption + 1) % pauseOptions.length;
+        }
+
+        if (e.key === "Enter") {
+          confirmPauseOption();
+        }
+      } else if (gameState === "levelComplete" && e.key === "Enter" && !e.repeat) {
+        currentLevelIndex++;
+        startGame();
+      } else if ((gameState === "win" || gameState === "gameOver") && e.key === "Enter") {
+        startGame();
+      }
+    });
+
+    window.addEventListener("keyup", (e) => {
+      keys[e.key] = false;
+    });
+
+    homeButton.addEventListener("click", () => {
+      if (gameState === "playing") {
+        pauseGame();
+      }
+    });
+
+    canvas.addEventListener("click", (e) => {
+      if (gameState !== "paused") return;
+
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      const mouseX = (e.clientX - rect.left) * scaleX;
+      const mouseY = (e.clientY - rect.top) * scaleY;
+
+      pauseOptions.forEach((option, index) => {
+        const optionX = canvas.width / 2 - 150;
+        const optionY = 300 + index * 54 - 22;
+        const optionWidth = 300;
+        const optionHeight = 42;
+
+        if (
+          mouseX >= optionX &&
+          mouseX <= optionX + optionWidth &&
+          mouseY >= optionY &&
+          mouseY <= optionY + optionHeight
+        ) {
+          selectedPauseOption = index;
+          confirmPauseOption();
+        }
+      });
+    });
+
+    function isHardMode() {
+      return difficulties[selectedDifficulty].name === "HARD";
+    }
+
+    function canCurrentLevelUseLaser() {
+      const laserLimit = levels[currentLevelIndex]?.laserLimit;
+
+      return (
+        laserLimit === "unlimited" ||
+        (
+          typeof laserLimit === "number" &&
+          laserShotsRemaining > 0
+        )
+      );
+    }
+
+    function getCurrentLevelLaserCooldownFrames() {
+      const cooldownSeconds = levels[currentLevelIndex]?.laserCooldown;
+
+      if (
+        typeof cooldownSeconds === "number" &&
+        cooldownSeconds >= 0
+      ) {
+        return cooldownSeconds * 60;
+      }
+
+      return LASER_COOLDOWN;
+    }
+
+    function doCurrentLevelEnemiesRespawn() {
+      return levels[currentLevelIndex]?.enemyRespawn === true;
+    }
+
+    function pauseGame() {
+      gameState = "paused";
+      selectedPauseOption = 0;
+      clearArrowKeys();
+    }
+
+    function resumeGame() {
+      gameState = "playing";
+      clearArrowKeys();
+    }
+
+    function backToMainMenu() {
+      gameState = "start";
+      hardRulesShown = false;
+      clearArrowKeys();
+    }
+
+    function confirmPauseOption() {
+      if (selectedPauseOption === 0) {
+        resumeGame();
+      } else {
+        backToMainMenu();
+      }
+    }
+
+    function updateButtons() {
+      homeButton.style.display = gameState === "playing" ? "block" : "none";
+    }
+
+    function makeEmptyMaze() {
+      const grid = [];
+
+      for (let row = 0; row < GRID_ROWS; row++) {
+        grid[row] = [];
+
+        for (let col = 0; col < GRID_COLS; col++) {
+          grid[row][col] =
+            row === 0 || col === 0 || row === GRID_ROWS - 1 || col === GRID_COLS - 1
+              ? WALL
+              : PATH;
+        }
+      }
+
+      return grid;
+    }
+
+    function copyMaze(source) {
+      return source.map(row => row.slice());
+    }
+
+    function shuffle(list) {
+      for (let i = list.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        const temp = list[i];
+        list[i] = list[j];
+        list[j] = temp;
+      }
+
+      return list;
+    }
+
+    function isReservedTile(col, row) {
+      const reserved = [
+        { col: 1, row: 1 },
+        { col: 2, row: 1 },
+        { col: 1, row: 2 },
+        { col: 2, row: 2 },
+        { col: 13, row: 13 },
+        { col: 14, row: 13 },
+        { col: 13, row: 14 },
+        { col: 14, row: 14 }
+      ];
+
+      return reserved.some(tile => tile.col === col && tile.row === row);
+    }
+
+    function tileNeighbors(col, row) {
+      return [
+        { col: col, row: row - 1 },
+        { col: col, row: row + 1 },
+        { col: col - 1, row: row },
+        { col: col + 1, row: row }
+      ];
+    }
+
+    function countPathNeighbors(grid, col, row) {
+      return tileNeighbors(col, row).filter(tile => (
+        tile.col >= 0 &&
+        tile.col < GRID_COLS &&
+        tile.row >= 0 &&
+        tile.row < GRID_ROWS &&
+        grid[tile.row][tile.col] === PATH
+      )).length;
+    }
+
+    function getPathTiles(grid) {
+      const tiles = [];
+
+      for (let row = 1; row < GRID_ROWS - 1; row++) {
+        for (let col = 1; col < GRID_COLS - 1; col++) {
+          if (grid[row][col] === PATH) {
+            tiles.push({ col, row });
+          }
+        }
+      }
+
+      return tiles;
+    }
+
+    function isMazeConnected(grid) {
+      const paths = getPathTiles(grid);
+      if (paths.length === 0) return false;
+
+      const start = paths[0];
+      const visited = new Set();
+      const queue = [start];
+
+      visited.add(start.col + "," + start.row);
+
+      while (queue.length > 0) {
+        const current = queue.shift();
+
+        tileNeighbors(current.col, current.row).forEach(next => {
+          const key = next.col + "," + next.row;
+
+          if (
+            next.col > 0 &&
+            next.col < GRID_COLS - 1 &&
+            next.row > 0 &&
+            next.row < GRID_ROWS - 1 &&
+            grid[next.row][next.col] === PATH &&
+            !visited.has(key)
+          ) {
+            visited.add(key);
+            queue.push(next);
+          }
+        });
+      }
+
+      return visited.size === paths.length;
+    }
+
+    function repairDeadEnds(grid) {
+      let changed = true;
+      let guard = 0;
+
+      while (changed && guard < 300) {
+        changed = false;
+        guard++;
+
+        for (let row = 1; row < GRID_ROWS - 1; row++) {
+          for (let col = 1; col < GRID_COLS - 1; col++) {
+            if (grid[row][col] !== PATH) continue;
+
+            if (countPathNeighbors(grid, col, row) < 2) {
+              const wallNeighbors = shuffle(tileNeighbors(col, row).filter(tile => (
+                tile.col > 0 &&
+                tile.col < GRID_COLS - 1 &&
+                tile.row > 0 &&
+                tile.row < GRID_ROWS - 1 &&
+                grid[tile.row][tile.col] === WALL &&
+                !isReservedTile(tile.col, tile.row)
+              )));
+
+              if (wallNeighbors.length > 0) {
+                const next = wallNeighbors[0];
+                grid[next.row][next.col] = PATH;
+                changed = true;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    function addWallIfSafe(grid, col, row) {
+      if (isReservedTile(col, row)) return false;
+      if (grid[row][col] === WALL) return false;
+
+      const testGrid = copyMaze(grid);
+      testGrid[row][col] = WALL;
+
+      if (!isMazeConnected(testGrid)) return false;
+
+      grid[row][col] = WALL;
+      return true;
+    }
+
+    function generateMaze() {
+      const config = difficulties[selectedDifficulty];
+      const grid = makeEmptyMaze();
+
+      for (let i = 0; i < config.blockCount; i++) {
+        const horizontal = Math.random() > 0.5;
+        const length = 1 + Math.floor(Math.random() * 3);
+        const startCol = 2 + Math.floor(Math.random() * (GRID_COLS - 4));
+        const startRow = 2 + Math.floor(Math.random() * (GRID_ROWS - 4));
+
+        for (let offset = 0; offset < length; offset++) {
+          const col = horizontal ? startCol + offset : startCol;
+          const row = horizontal ? startRow : startRow + offset;
+
+          if (col < GRID_COLS - 1 && row < GRID_ROWS - 1) {
+            addWallIfSafe(grid, col, row);
+          }
+        }
+      }
+
+      for (let row = 1; row < GRID_ROWS - 1; row++) {
+        for (let col = 1; col < GRID_COLS - 1; col++) {
+          if (
+            Math.random() < config.wallChance &&
+            (col + row) % 2 === 0
+          ) {
+            addWallIfSafe(grid, col, row);
+          }
+        }
+      }
+
+      repairDeadEnds(grid);
+      maze = grid;
+
+      if (isHardMode()) {
+        carvePigHome();
+      }
+    }
+        function carvePigHome() {
+      const wallTiles = [
+        { col: 6, row: 6 },
+        { col: 7, row: 6 },
+        { col: 8, row: 6 },
+        { col: 9, row: 6 },
+
+        { col: 6, row: 7 },
+        { col: 9, row: 7 },
+
+        { col: 6, row: 8 },
+        { col: 9, row: 8 },
+
+        { col: 6, row: 9 },
+        { col: 7, row: 9 },
+        { col: 9, row: 9 }
+      ];
+
+      const pathTiles = [
+        { col: 7, row: 7 },
+        { col: 8, row: 7 },
+        { col: 7, row: 8 },
+        { col: 8, row: 8 },
+        { col: 8, row: 9 },
+        { col: 8, row: 10 }
+      ];
+
+      wallTiles.forEach(tile => {
+        maze[tile.row][tile.col] = WALL;
+      });
+
+      pathTiles.forEach(tile => {
+        maze[tile.row][tile.col] = PATH;
+      });
+    }
+
+    function getHitbox(x, y, size, padding) {
+      return {
+        x: x + padding,
+        y: y + padding,
+        width: size - padding * 2,
+        height: size - padding * 2
+      };
+    }
+
+    function isRectOverlapping(rectA, rectB) {
+      return (
+        rectA.x < rectB.x + rectB.width &&
+        rectA.x + rectA.width > rectB.x &&
+        rectA.y < rectB.y + rectB.height &&
+        rectA.y + rectA.height > rectB.y
+      );
+    }
+
+    function rectTouchesWall(x, y, size, hitboxPadding) {
+      const hitbox = getHitbox(x, y, size, hitboxPadding);
+
+      const left = Math.floor(hitbox.x / TILE_SIZE);
+      const right = Math.floor((hitbox.x + hitbox.width - 1) / TILE_SIZE);
+      const top = Math.floor(hitbox.y / TILE_SIZE);
+      const bottom = Math.floor((hitbox.y + hitbox.height - 1) / TILE_SIZE);
+
+      for (let row = top; row <= bottom; row++) {
+        for (let col = left; col <= right; col++) {
+          if (
+            row < 0 ||
+            row >= GRID_ROWS ||
+            col < 0 ||
+            col >= GRID_COLS
+          ) {
+            return true;
+          }
+
+          if (maze[row][col] !== WALL) {
+            continue;
+          }
+
+          const wallCollisionBox = {
+            x: col * TILE_SIZE + WALL_COLLISION_PADDING,
+            y: row * TILE_SIZE + WALL_COLLISION_PADDING,
+            width: TILE_SIZE - WALL_COLLISION_PADDING * 2,
+            height: TILE_SIZE - WALL_COLLISION_PADDING * 2
+          };
+
+          if (isRectOverlapping(hitbox, wallCollisionBox)) {
+            return true;
+          }
+        }
+      }
+
+      return false;
+    }
+
+    function canEntityMoveTo(entity, newX, newY) {
+      const hitboxPadding =
+        entity === player
+          ? PLAYER_HITBOX_PADDING
+          : ENEMY_HITBOX_PADDING;
+
+      return !rectTouchesWall(newX, newY, entity.size, hitboxPadding);
+    }
+
+    function canMoveTo(newX, newY) {
+      return canEntityMoveTo(player, newX, newY);
+    }
+
+    function distance(x1, y1, x2, y2) {
+      const dx = x1 - x2;
+      const dy = y1 - y2;
+
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    function tileCenter(col, row) {
+      return {
+        x: col * TILE_SIZE + TILE_SIZE / 2,
+        y: row * TILE_SIZE + TILE_SIZE / 2
+      };
+    }
+
+    function randomPathTile(minDistanceFromStart) {
+      const pathTiles = shuffle(getPathTiles(maze).filter(tile => {
+        const center = tileCenter(tile.col, tile.row);
+        const startCenterX = player.startX + player.size / 2;
+        const startCenterY = player.startY + player.size / 2;
+
+        return distance(center.x, center.y, startCenterX, startCenterY) >= minDistanceFromStart;
+      }));
+
+      return pathTiles[0] || { col: 1, row: 1 };
+    }
+
+    function pigHomeSpawnTile(index) {
+      return pigHome.spawnTiles[index % pigHome.spawnTiles.length];
+    }
+    function isPigHomeProtectedTile(col, row) {
+      if (!isHardMode()) return false;
+
+      return pigHome.protectedTiles.some(tile => tile.col === col && tile.row === row);
+    }
+
+    function isNearPigHomeSpawn(centerX, centerY) {
+      if (!isHardMode()) return false;
+
+      return pigHome.spawnTiles.some(tile => {
+        const center = tileCenter(tile.col, tile.row);
+        return distance(centerX, centerY, center.x, center.y) < 70;
+      });
+    }
+
+    function isTooCloseToOtherStars(x, y) {
+      return stars.some(star => distance(x, y, star.x, star.y) < 34);
+    }
+
+    function isTooCloseToOtherEnemies(x, y) {
+      return enemies.some(enemy => {
+        const enemyCenterX = enemy.x + enemy.size / 2;
+        const enemyCenterY = enemy.y + enemy.size / 2;
+
+        return distance(x, y, enemyCenterX, enemyCenterY) < 70;
+      });
+    }
+    function getReachableTiles() {
+      const startCol = Math.floor((player.startX + player.size / 2) / TILE_SIZE);
+      const startRow = Math.floor((player.startY + player.size / 2) / TILE_SIZE);
+      const reachableTiles = [];
+      const visited = new Set();
+      const queue = [{ col: startCol, row: startRow }];
+
+      visited.add(startCol + "," + startRow);
+
+      while (queue.length > 0) {
+        const current = queue.shift();
+
+        if (
+          current.col <= 0 ||
+          current.col >= GRID_COLS - 1 ||
+          current.row <= 0 ||
+          current.row >= GRID_ROWS - 1 ||
+          maze[current.row][current.col] !== PATH
+        ) {
+          continue;
+        }
+
+        reachableTiles.push(current);
+
+        tileNeighbors(current.col, current.row).forEach(next => {
+          const key = next.col + "," + next.row;
+
+          if (
+            next.col > 0 &&
+            next.col < GRID_COLS - 1 &&
+            next.row > 0 &&
+            next.row < GRID_ROWS - 1 &&
+            maze[next.row][next.col] === PATH &&
+            !visited.has(key)
+          ) {
+            visited.add(key);
+            queue.push(next);
+          }
+        });
+      }
+
+      return reachableTiles;
+    }
+
+    function getStarSpawnTiles() {
+      const startCenterX = player.startX + player.size / 2;
+      const startCenterY = player.startY + player.size / 2;
+
+      return getReachableTiles().filter(tile => {
+        const center = tileCenter(tile.col, tile.row);
+        const farFromPlayerStart =
+          distance(center.x, center.y, startCenterX, startCenterY) >= 110;
+
+        const hasBreathingRoom =
+          countPathNeighbors(maze, tile.col, tile.row) >= 2;
+
+        return (
+          farFromPlayerStart &&
+          hasBreathingRoom &&
+          !isPigHomeProtectedTile(tile.col, tile.row) &&
+          !isNearPigHomeSpawn(center.x, center.y)
+        );
+      });
+    }
+        function generateStars(amount) {
+      stars = [];
+
+      const candidates = shuffle(getStarSpawnTiles());
+
+      for (let i = 0; i < candidates.length && stars.length < amount; i++) {
+        const tile = candidates[i];
+        const center = tileCenter(tile.col, tile.row);
+
+        if (!isTooCloseToOtherStars(center.x, center.y)) {
+          stars.push({
+            x: center.x,
+            y: center.y,
+            radius: 8,
+            collected: false
+          });
+        }
+      }
+
+      return stars.length === amount;
+    }
+
+    function chooseEnemyDirection(enemy) {
+      const directions = shuffle([
+        { dx: 0, dy: -1 },
+        { dx: 0, dy: 1 },
+        { dx: -1, dy: 0 },
+        { dx: 1, dy: 0 }
+      ]);
+
+      for (let i = 0; i < directions.length; i++) {
+        const direction = directions[i];
+        const nextX = enemy.x + direction.dx * enemy.speed;
+        const nextY = enemy.y + direction.dy * enemy.speed;
+
+        if (canEntityMoveTo(enemy, nextX, nextY)) {
+          enemy.dx = direction.dx;
+          enemy.dy = direction.dy;
+          enemy.moveTimer = 25 + Math.floor(Math.random() * 65);
+          return;
+        }
+      }
+
+      enemy.dx = 0;
+      enemy.dy = 0;
+      enemy.moveTimer = 20;
+    }
+
+    function generateEnemies(amount) {
+      enemies = [];
+      let attempts = 0;
+
+      while (enemies.length < amount && attempts < 8000) {
+        const size = 32;
+        const tile = isHardMode() ? pigHomeSpawnTile(enemies.length) : randomPathTile(260);
+        const x = tile.col * TILE_SIZE + 4;
+        const y = tile.row * TILE_SIZE + 4;
+
+                const enemyPreview = {
+          size
+        };
+
+        if (
+          canEntityMoveTo(enemyPreview, x, y) &&
+          (isHardMode() || !isTooCloseToOtherEnemies(x, y))
+        ) {
+          const enemy = {
+            x,
+            y,
+            homeX: x,
+            homeY: y,
+            size,
+            speed: 2,
+            dx: 0,
+            dy: 0,
+            moveTimer: 0,
+            active: true,
+            respawnTimer: 0,
+            floatPhase: Math.random() * Math.PI * 2
+          };
+
+          chooseEnemyDirection(enemy);
+          enemies.push(enemy);
+        }
+
+        attempts++;
+      }
+    }
+
+    function clearArrowKeys() {
+      keys.ArrowUp = false;
+      keys.ArrowDown = false;
+      keys.ArrowLeft = false;
+      keys.ArrowRight = false;
+    }
+
+    function resetPlayer() {
+      player.x = player.startX;
+      player.y = player.startY;
+      invincibleTimer = 90;
+      clearArrowKeys();
+    }
+
+    function startGame() {
+      const level = levels[currentLevelIndex];
+      const enemyCount = level.enemyGroups.reduce(
+        (total, group) => total + group.count,
+        0
+      );
+
+      score = 0;
+      lives = 3;
+      currentFrame = 0;
+      frameTimer = 0;
+      invincibleTimer = 0;
+      laserCooldown = 0;
+      laserShotsRemaining =
+        typeof level.laserLimit === "number"
+          ? level.laserLimit
+          : 0;
+      lasers = [];
+      facingDirection = { dx: 1, dy: 0 };
+      player.x = player.startX;
+      player.y = player.startY;
+      clearArrowKeys();
+            let starsGenerated = false;
+
+      while (!starsGenerated) {
+        generateMaze();
+        starsGenerated = generateStars(level.starCount);
+      }
+
+      generateEnemies(enemyCount);
+
+      levelIntroNextState =
+        isHardMode() && !hardRulesShown
+          ? "hardRules"
+          : "playing";
+      gameState = "levelIntro";
+    }
+
+    function isTouchingStar(star) {
+      return (
+        player.x < star.x + star.radius &&
+        player.x + player.size > star.x - star.radius &&
+        player.y < star.y + star.radius &&
+        player.y + player.size > star.y - star.radius
+      );
+    }
+
+    function collectStars() {
+      stars.forEach(star => {
+        if (!star.collected && isTouchingStar(star)) {
+          star.collected = true;
+          score++;
+        }
+      });
+
+      if (stars.length > 0 && score >= stars.length) {
+        gameState =
+          currentLevelIndex < levels.length - 1
+            ? "levelComplete"
+            : "win";
+        clearArrowKeys();
+      }
+    }
+
+    function isPlayerTouchingEnemy(enemy) {
+      if (!enemy.active) return false;
+
+      return (
+        player.x < enemy.x + enemy.size &&
+        player.x + player.size > enemy.x &&
+        player.y < enemy.y + enemy.size &&
+        player.y + player.size > enemy.y
+      );
+    }
+
+    function getLaserEnd(startX, startY, dx, dy) {
+      let x = startX;
+      let y = startY;
+
+      while (
+        x > 0 &&
+        x < canvas.width &&
+        y > 0 &&
+        y < canvas.height &&
+        !rectTouchesWall(x - 2, y - 2, 4)
+      ) {
+        x += dx * 8;
+        y += dy * 8;
+      }
+
+      return { x, y };
+    }
+
+    function fireLaser() {
+      if (!canCurrentLevelUseLaser() || laserCooldown > 0) return;
+
+      const startX = player.x + player.size / 2;
+      const startY = player.y + player.size / 2;
+      const end = getLaserEnd(startX, startY, facingDirection.dx, facingDirection.dy);
+
+      const laser = {
+        x1: startX,
+        y1: startY,
+        x2: end.x,
+        y2: end.y,
+        dx: facingDirection.dx,
+        dy: facingDirection.dy,
+        timer: LASER_DURATION
+      };
+
+      lasers.push(laser);
+      laserCooldown = getCurrentLevelLaserCooldownFrames();
+
+      if (typeof levels[currentLevelIndex].laserLimit === "number") {
+        laserShotsRemaining--;
+      }
+
+      hitEnemiesWithLaser(laser);
+    }
+
+    function laserTouchesEnemy(laser, enemy) {
+      if (!enemy.active) return false;
+
+      const padding = 8;
+
+      if (laser.dx !== 0) {
+        const minX = Math.min(laser.x1, laser.x2);
+        const maxX = Math.max(laser.x1, laser.x2);
+
+        return (
+          enemy.x < maxX &&
+          enemy.x + enemy.size > minX &&
+          enemy.y < laser.y1 + padding &&
+          enemy.y + enemy.size > laser.y1 - padding
+        );
+      }
+
+      const minY = Math.min(laser.y1, laser.y2);
+      const maxY = Math.max(laser.y1, laser.y2);
+
+      return (
+        enemy.y < maxY &&
+        enemy.y + enemy.size > minY &&
+        enemy.x < laser.x1 + padding &&
+        enemy.x + enemy.size > laser.x1 - padding
+      );
+    }
+
+    function hitEnemiesWithLaser(laser) {
+      enemies.forEach(enemy => {
+        if (laserTouchesEnemy(laser, enemy)) {
+          enemy.active = false;
+          enemy.respawnTimer =
+            doCurrentLevelEnemiesRespawn()
+              ? PIG_RESPAWN_TIME
+              : 0;
+          enemy.dx = 0;
+          enemy.dy = 0;
+        }
+      });
+    }
+
+    function respawnEnemy(enemy) {
+      enemy.x = enemy.homeX;
+      enemy.y = enemy.homeY;
+      enemy.active = true;
+      enemy.respawnTimer = 0;
+      chooseEnemyDirection(enemy);
+    }
+
+    function updateLasers() {
+      if (laserCooldown > 0) {
+        laserCooldown--;
+      }
+
+      lasers.forEach(laser => {
+        laser.timer--;
+      });
+
+      lasers = lasers.filter(laser => laser.timer > 0);
+    }
+
+    function updateEnemies() {
+      enemies.forEach(enemy => {
+        if (!enemy.active) {
+          if (!doCurrentLevelEnemiesRespawn()) {
+            return;
+          }
+
+          enemy.respawnTimer--;
+
+          if (enemy.respawnTimer <= 0) {
+            respawnEnemy(enemy);
+          }
+
+          return;
+        }
+
+        enemy.moveTimer--;
+
+        if (enemy.moveTimer <= 0) {
+          chooseEnemyDirection(enemy);
+        }
+
+        let nextX = enemy.x + enemy.dx * enemy.speed;
+        let nextY = enemy.y + enemy.dy * enemy.speed;
+
+        if (canEntityMoveTo(enemy, nextX, nextY)) {
+          enemy.x = nextX;
+          enemy.y = nextY;
+        } else {
+          chooseEnemyDirection(enemy);
+
+          nextX = enemy.x + enemy.dx * enemy.speed;
+          nextY = enemy.y + enemy.dy * enemy.speed;
+
+          if (canEntityMoveTo(enemy, nextX, nextY)) {
+            enemy.x = nextX;
+            enemy.y = nextY;
+          }
+        }
+      });
+    }
+
+    function checkEnemyCollision() {
+      if (invincibleTimer > 0) {
+        invincibleTimer--;
+        return;
+      }
+
+      if (enemies.some(enemy => isPlayerTouchingEnemy(enemy))) {
+        lives--;
+
+        if (lives <= 0) {
+          lives = 0;
+          gameState = "gameOver";
+          clearArrowKeys();
+        } else {
+          resetPlayer();
+        }
+      }
+    }
+
+    function drawStar(x, y, radius, sparkle) {
+      ctx.save();
+
+      ctx.shadowColor = "white";
+      ctx.shadowBlur = 10 + sparkle * 10;
+      ctx.fillStyle = "rgba(255, 255, 255, 0.96)";
+
+      ctx.beginPath();
+
+      for (let i = 0; i < 10; i++) {
+        const angle = -Math.PI / 2 + i * Math.PI / 5;
+        const pointRadius = i % 2 === 0 ? radius + sparkle * 2 : radius * 0.45;
+        const px = x + Math.cos(angle) * pointRadius;
+        const py = y + Math.sin(angle) * pointRadius;
+
+        if (i === 0) {
+          ctx.moveTo(px, py);
+        } else {
+          ctx.lineTo(px, py);
+        }
+      }
+
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.restore();
+    }
+
+    function drawBackground() {
+      const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+      gradient.addColorStop(0, "#11001f");
+      gradient.addColorStop(0.5, "#24003d");
+      gradient.addColorStop(1, "#080018");
+
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.save();
+      ctx.globalAlpha = 0.14;
+      ctx.strokeStyle = "#ff7bff";
+      ctx.lineWidth = 1;
+
+      for (let x = 0; x <= canvas.width; x += TILE_SIZE) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, canvas.height);
+        ctx.stroke();
+      }
+
+      for (let y = 0; y <= canvas.height; y += TILE_SIZE) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvas.width, y);
+        ctx.stroke();
+      }
+
+      ctx.restore();
+    }
+
+    function drawMazeWalls() {
+      for (let row = 0; row < GRID_ROWS; row++) {
+        for (let col = 0; col < GRID_COLS; col++) {
+          if (maze[row][col] !== WALL) continue;
+
+          const x = col * TILE_SIZE;
+          const y = row * TILE_SIZE;
+
+          ctx.save();
+
+          ctx.shadowColor = "#ff4df3";
+          ctx.shadowBlur = 16;
+          ctx.fillStyle = "#ff4df3";
+          ctx.fillRect(x + 3, y + 3, TILE_SIZE - 6, TILE_SIZE - 6);
+
+          ctx.shadowColor = "#8b5cff";
+          ctx.shadowBlur = 22;
+          ctx.fillStyle = "#8b5cff";
+          ctx.fillRect(x + 6, y + 6, TILE_SIZE - 12, TILE_SIZE - 12);
+
+          ctx.shadowBlur = 0;
+          ctx.fillStyle = "#ffd6ff";
+          ctx.globalAlpha = 0.78;
+          ctx.fillRect(x + 9, y + 9, TILE_SIZE - 18, 4);
+
+          ctx.globalAlpha = 0.2;
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(x + 9, y + 9, 4, TILE_SIZE - 18);
+
+          ctx.restore();
+        }
+      }
+    }
+
+    function drawPigHome() {
+      // 猪猪之家由 HARD 模式迷宫墙体本身围成，这里不额外绘制装饰盒子。
+    }
+
+    function drawLaser(laser) {
+      ctx.save();
+
+      ctx.globalAlpha = Math.max(0.25, laser.timer / LASER_DURATION);
+      ctx.lineCap = "square";
+
+      ctx.shadowColor = "#6bdcff";
+      ctx.shadowBlur = 22;
+      ctx.strokeStyle = "#6c5cff";
+      ctx.lineWidth = 12;
+      ctx.beginPath();
+      ctx.moveTo(laser.x1, laser.y1);
+      ctx.lineTo(laser.x2, laser.y2);
+      ctx.stroke();
+
+      ctx.shadowColor = "#ffffff";
+      ctx.shadowBlur = 14;
+      ctx.strokeStyle = "#d9f8ff";
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.moveTo(laser.x1, laser.y1);
+      ctx.lineTo(laser.x2, laser.y2);
+      ctx.stroke();
+
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(laser.x1, laser.y1);
+      ctx.lineTo(laser.x2, laser.y2);
+      ctx.stroke();
+
+      ctx.restore();
+    }
+
+    function drawAlienPig(enemy) {
+      if (!enemy.active) return;
+
+      const floatOffset = Math.sin(performance.now() / 180 + enemy.floatPhase) * 2;
+
+      ctx.save();
+      ctx.translate(Math.round(enemy.x), Math.round(enemy.y + floatOffset));
+
+      ctx.shadowColor = "#ff4df3";
+      ctx.shadowBlur = 16;
+
+      ctx.fillStyle = "#ff77e9";
+      ctx.fillRect(5, 9, 22, 18);
+      ctx.fillRect(9, 5, 14, 6);
+      ctx.fillRect(3, 15, 26, 14);
+
+      ctx.fillStyle = "#b967ff";
+      ctx.fillRect(1, 11, 5, 8);
+      ctx.fillRect(26, 11, 5, 8);
+
+      ctx.fillStyle = "#ffb3f6";
+      ctx.fillRect(11, 18, 10, 7);
+      ctx.fillRect(9, 17, 14, 3);
+
+      ctx.fillStyle = "#6d147c";
+      ctx.fillRect(13, 20, 2, 2);
+      ctx.fillRect(19, 20, 2, 2);
+
+      ctx.fillStyle = "#f8e7ff";
+      ctx.fillRect(8, 13, 5, 5);
+      ctx.fillRect(21, 13, 5, 5);
+
+      ctx.fillStyle = "#27113d";
+      ctx.fillRect(10, 15, 2, 2);
+      ctx.fillRect(23, 15, 2, 2);
+
+      ctx.fillStyle = "#d97cff";
+      ctx.fillRect(13, 1, 3, 6);
+      ctx.fillRect(18, 1, 3, 6);
+
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(12, 0, 5, 3);
+      ctx.fillRect(17, 0, 5, 3);
+
+      ctx.fillStyle = "#ff4df3";
+      ctx.fillRect(6, 28, 5, 4);
+      ctx.fillRect(15, 28, 5, 4);
+      ctx.fillRect(24, 28, 5, 4);
+
+      ctx.globalAlpha = 0.72;
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(9, 7, 14, 2);
+
+      ctx.restore();
+    }
+
+    function update() {
+      let nextX = player.x;
+      let nextY = player.y;
+
+      if (keys["ArrowUp"]) {
+        nextY -= player.speed;
+        facingDirection = { dx: 0, dy: -1 };
+      }
+
+      if (keys["ArrowDown"]) {
+        nextY += player.speed;
+        facingDirection = { dx: 0, dy: 1 };
+      }
+
+      if (keys["ArrowLeft"]) {
+        nextX -= player.speed;
+        facingDirection = { dx: -1, dy: 0 };
+      }
+
+      if (keys["ArrowRight"]) {
+        nextX += player.speed;
+        facingDirection = { dx: 1, dy: 0 };
+      }
+
+      if (canMoveTo(nextX, nextY)) {
+        player.x = nextX;
+        player.y = nextY;
+      }
+
+      updateLasers();
+      updateEnemies();
+      collectStars();
+      checkEnemyCollision();
+
+      frameTimer++;
+
+      if (frameTimer > 10) {
+        currentFrame++;
+        frameTimer = 0;
+
+        if (currentFrame > 3) {
+          currentFrame = 0;
+        }
+      }
+    }
+
+    function drawHearts() {
+      ctx.save();
+      ctx.fillStyle = "#ff304f";
+      ctx.shadowColor = "#ff304f";
+      ctx.shadowBlur = 10;
+      ctx.font = "24px monospace";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+      ctx.fillText("♥".repeat(lives), 18, 42);
+      ctx.restore();
+    }
+
+    function drawLaserHud() {
+      const level = levels[currentLevelIndex];
+      const laserLimit = level.laserLimit;
+
+      if (laserLimit === null || laserLimit === undefined) return;
+
+      const x = 18;
+      const y = 72;
+      const width = 118;
+      const height = 12;
+      const hasShots =
+        laserLimit === "unlimited" ||
+        laserShotsRemaining > 0;
+      const ready = hasShots && laserCooldown <= 0;
+      const cooldownFrames = getCurrentLevelLaserCooldownFrames();
+      const progress =
+        !hasShots
+          ? 0
+          : ready || cooldownFrames === 0
+            ? 1
+            : 1 - laserCooldown / cooldownFrames;
+      const pulse = 0.72 + Math.sin(performance.now() / 130) * 0.28;
+      const shotsLabel =
+        laserLimit === "unlimited"
+          ? "∞"
+          : laserShotsRemaining;
+
+      ctx.save();
+
+      ctx.font = "14px monospace";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+      ctx.fillStyle = ready ? "#dffbff" : "#a89bcf";
+      ctx.shadowColor = ready ? "#7deaff" : "#41346d";
+      ctx.shadowBlur = ready ? 12 * pulse : 5;
+      ctx.fillText("LASER " + shotsLabel, x, y);
+
+      ctx.fillStyle = "rgba(12, 10, 38, 0.9)";
+      ctx.shadowBlur = 0;
+      ctx.fillRect(x, y + 20, width, height);
+
+      ctx.strokeStyle = ready ? "#dffbff" : "#665a91";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x - 2, y + 18, width + 4, height + 4);
+
+      ctx.shadowColor = ready ? "#7deaff" : "#342c66";
+      ctx.shadowBlur = ready ? 14 * pulse : 4;
+      ctx.fillStyle = ready ? "#dffbff" : "#4d4778";
+      ctx.fillRect(x, y + 20, Math.max(0, width * progress), height);
+
+      ctx.fillStyle = ready ? "#ffffff" : "#8f86bf";
+      ctx.globalAlpha = ready ? 0.85 : 0.55;
+      ctx.fillRect(x + 3, y + 23, Math.max(0, width * progress - 6), 2);
+
+      if (!ready && laserCooldown > 0) {
+        ctx.globalAlpha = 1;
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = "#c9c2ec";
+        ctx.font = "13px monospace";
+        ctx.fillText(Math.ceil(laserCooldown / 60) + "s", x + width + 10, y + 18);
+      }
+
+      ctx.restore();
+    }
+
+    function drawHud() {
+      ctx.save();
+      ctx.fillStyle = "white";
+      ctx.shadowColor = "#ff7bff";
+      ctx.shadowBlur = 10;
+      ctx.font = "22px monospace";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+      ctx.fillText("Score: " + score, 18, 14);
+      ctx.restore();
+
+      drawHearts();
+      drawLaserHud();
+    }
+
+    function drawStartScreen() {
+      drawBackground();
+
+      const time = performance.now() / 300;
+
+      for (let i = 0; i < 24; i++) {
+        const x = 55 + (i * 91) % 535;
+        const y = 55 + (i * 149) % 535;
+        const sparkle = (Math.sin(time + i) + 1) / 2;
+
+        drawStar(x, y, 4 + (i % 3), sparkle);
+      }
+
+      ctx.save();
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+
+      ctx.shadowColor = "#ff7bff";
+      ctx.shadowBlur = 22;
+      ctx.fillStyle = "white";
+      ctx.font = "52px monospace";
+      ctx.fillText("NJZ Star Maze", canvas.width / 2, 155);
+
+      ctx.shadowColor = "#8b5cff";
+      ctx.shadowBlur = 14;
+      ctx.font = "24px monospace";
+      ctx.fillText("NJZ don't be blue", canvas.width / 2, 210);
+
+      ctx.font = "24px monospace";
+
+      startOptions.forEach((option, index) => {
+        const y = 292 + index * 48;
+        const isSelected = index === selectedStartOption;
+        const isAvailable = option.available !== false;
+
+        ctx.shadowColor =
+          isSelected && isAvailable
+            ? "#ff7bff"
+            : "transparent";
+        ctx.shadowBlur = isSelected && isAvailable ? 18 : 0;
+        ctx.fillStyle =
+          !isAvailable
+            ? "rgba(255, 255, 255, 0.28)"
+            : isSelected
+              ? "#ffffff"
+              : "rgba(255, 255, 255, 0.62)";
+
+        const prefix = isSelected ? "> " : "  ";
+        const suffix = isSelected ? " <" : "  ";
+        ctx.fillText(
+          prefix + option.label + suffix,
+          canvas.width / 2,
+          y
+        );
+      });
+
+      const blink = 0.55 + Math.sin(performance.now() / 350) * 0.35;
+      ctx.shadowColor = "white";
+      ctx.shadowBlur = 12;
+      ctx.fillStyle = "rgba(255, 255, 255, " + blink + ")";
+      ctx.font = "20px monospace";
+      ctx.fillText("Press Enter", canvas.width / 2, 520);
+
+      ctx.restore();
+    }
+    function drawCharacterSelectScreen() {
+      drawBackground();
+
+      ctx.save();
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+
+      ctx.shadowColor = "#ff7bff";
+      ctx.shadowBlur = 22;
+      ctx.fillStyle = "white";
+      ctx.font = "44px monospace";
+      ctx.fillText("CHARACTER SELECT", canvas.width / 2, 130);
+
+      const startX = canvas.width / 2 - 180;
+      const y = 285;
+      const gap = 90;
+
+      characterImages.forEach((image, index) => {
+        const x = startX + index * gap;
+        const isSelected = index === previewCharacterIndex;
+
+        ctx.save();
+
+        ctx.shadowColor = isSelected ? "#7deaff" : "transparent";
+        ctx.shadowBlur = isSelected ? 18 : 0;
+        ctx.strokeStyle = isSelected ? "#dffbff" : "rgba(255, 255, 255, 0.35)";
+        ctx.lineWidth = isSelected ? 4 : 2;
+        ctx.fillStyle = "rgba(35, 0, 60, 0.72)";
+        ctx.fillRect(x - 30, y - 34, 60, 68);
+        ctx.strokeRect(x - 30, y - 34, 60, 68);
+
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(
+          image,
+          0,
+          0,
+          16,
+          16,
+          x - 24,
+          y - 24,
+          48,
+          48
+        );
+
+        ctx.restore();
+      });
+
+      ctx.shadowColor = "#ff7bff";
+      ctx.shadowBlur = 10;
+      ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
+      ctx.font = "18px monospace";
+      ctx.fillText("← → Select   Enter Confirm   Esc Back", canvas.width / 2, 455);
+
+      ctx.restore();
+    }
+
+    function isLevelUnlocked(levelIndex) {
+      return levelIndex === 0;
+    }
+
+    function isDebugLevelShortcutPressed() {
+      const isLPressed = keys.l || keys.L;
+      const isQPressed = keys.q || keys.Q;
+
+      return isLPressed && isQPressed;
+    }
+
+    function drawLevelSelectScreen() {
+      drawBackground();
+
+      const columns = 5;
+      const tileWidth = 82;
+      const tileHeight = 58;
+      const gap = 14;
+      const gridWidth = columns * tileWidth + (columns - 1) * gap;
+      const startX = (canvas.width - gridWidth) / 2;
+      const startY = 166;
+
+      ctx.save();
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+
+      ctx.shadowColor = "#ff7bff";
+      ctx.shadowBlur = 22;
+      ctx.fillStyle = "white";
+      ctx.font = "42px monospace";
+      ctx.fillText(
+        debugLevelSelectMode
+          ? "SELECT LEVEL [DEBUG]"
+          : "SELECT LEVEL",
+        canvas.width / 2,
+        92
+      );
+
+      levels.forEach((level, index) => {
+        const col = index % columns;
+        const row = Math.floor(index / columns);
+        const x = startX + col * (tileWidth + gap);
+        const y = startY + row * (tileHeight + gap);
+        const isSelected = index === selectedLevelOption;
+        const isUnlocked = isLevelUnlocked(index);
+        const isSelectable = debugLevelSelectMode || isUnlocked;
+
+        ctx.shadowColor =
+          isSelected
+            ? isSelectable
+              ? "#7deaff"
+              : "#76588f"
+            : "transparent";
+        ctx.shadowBlur = isSelected ? 16 : 0;
+        ctx.fillStyle =
+          isSelectable
+            ? "rgba(55, 10, 88, 0.92)"
+            : "rgba(24, 12, 38, 0.82)";
+        ctx.fillRect(x, y, tileWidth, tileHeight);
+
+        ctx.strokeStyle =
+          isSelected
+            ? isSelectable
+              ? "#dffbff"
+              : "#806895"
+            : isSelectable
+              ? "#ff77e9"
+              : "rgba(255, 255, 255, 0.2)";
+        ctx.lineWidth = isSelected ? 3 : 2;
+        ctx.strokeRect(x, y, tileWidth, tileHeight);
+
+        ctx.shadowBlur = 0;
+        ctx.fillStyle =
+          isSelectable
+            ? "#ffffff"
+            : "rgba(255, 255, 255, 0.3)";
+        ctx.font = "22px monospace";
+        ctx.fillText(
+          String(level.id).padStart(2, "0"),
+          x + tileWidth / 2,
+          y + 22
+        );
+
+        ctx.font = "11px monospace";
+        ctx.fillText(
+          debugLevelSelectMode
+            ? "TEST"
+            : isUnlocked
+              ? "OPEN"
+              : "LOCKED",
+          x + tileWidth / 2,
+          y + 44
+        );
+      });
+
+      ctx.shadowColor = "#ff7bff";
+      ctx.shadowBlur = 10;
+      ctx.fillStyle = "rgba(255, 255, 255, 0.82)";
+      ctx.font = "16px monospace";
+      ctx.fillText(
+        "Arrow Keys Select   Enter Start   Esc Back",
+        canvas.width / 2,
+        565
+      );
+
+      ctx.restore();
+    }
+
+    function drawGame() {
+      drawBackground();
+      drawMazeWalls();
+      drawPigHome();
+
+      const time = performance.now() / 300;
+
+      stars.forEach((star, index) => {
+        if (!star.collected) {
+          const sparkle = (Math.sin(time + index) + 1) / 2;
+          drawStar(star.x, star.y, star.radius, sparkle);
+        }
+      });
+
+      enemies.forEach(enemy => {
+        drawAlienPig(enemy);
+      });
+
+      lasers.forEach(laser => {
+        drawLaser(laser);
+      });
+
+      if (invincibleTimer <= 0 || Math.floor(invincibleTimer / 6) % 2 === 0) {
+        ctx.drawImage(
+          characterImages[selectedCharacterIndex],
+          currentFrame * 16,
+          0,
+          16,
+          16,
+          player.x,
+          player.y,
+          player.size,
+          player.size
+        );
+      }
+
+      drawHud();
+    }
+
+    function drawPauseMenu() {
+      drawGame();
+
+      ctx.save();
+      ctx.fillStyle = "rgba(13, 0, 30, 0.78)";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.fillStyle = "rgba(35, 0, 60, 0.92)";
+      ctx.shadowColor = "#ff5cf4";
+      ctx.shadowBlur = 22;
+      ctx.fillRect(160, 200, 320, 240);
+
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = "white";
+      ctx.lineWidth = 3;
+      ctx.strokeRect(160, 200, 320, 240);
+
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+
+      ctx.shadowColor = "#ff7bff";
+      ctx.shadowBlur = 18;
+      ctx.fillStyle = "white";
+      ctx.font = "42px monospace";
+      ctx.fillText("PAUSED", canvas.width / 2, 250);
+
+      ctx.font = "20px monospace";
+
+      pauseOptions.forEach((option, index) => {
+        const y = 300 + index * 54;
+        const isSelected = index === selectedPauseOption;
+
+        ctx.shadowColor = isSelected ? "#ff7bff" : "transparent";
+        ctx.shadowBlur = isSelected ? 14 : 0;
+        ctx.fillStyle = isSelected ? "white" : "rgba(255, 255, 255, 0.64)";
+
+        const prefix = isSelected ? "> " : "  ";
+        const suffix = isSelected ? " <" : "  ";
+        ctx.fillText(prefix + option + suffix, canvas.width / 2, y);
+      });
+
+      ctx.restore();
+    }
+    function drawHardRulesScreen() {
+      drawGame();
+
+      ctx.save();
+
+      ctx.fillStyle = "rgba(8, 0, 18, 0.78)";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.fillStyle = "rgba(35, 0, 70, 0.94)";
+      ctx.shadowColor = "#ff5cf4";
+      ctx.shadowBlur = 24;
+      ctx.fillRect(96, 220, 448, 200);
+
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = "#ff77e9";
+      ctx.lineWidth = 4;
+      ctx.strokeRect(96, 220, 448, 200);
+
+      ctx.strokeStyle = "#ffd6ff";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(110, 234, 420, 172);
+
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+
+      ctx.shadowColor = "#ff7bff";
+      ctx.shadowBlur = 14;
+      ctx.fillStyle = "white";
+      ctx.font = "24px monospace";
+      ctx.fillText("按空格键发射激光，消灭猪猪", canvas.width / 2, 292);
+
+      const blink = 0.55 + Math.sin(performance.now() / 350) * 0.35;
+      ctx.shadowColor = "#7deaff";
+      ctx.shadowBlur = 12;
+      ctx.fillStyle = "rgba(223, 251, 255, " + blink + ")";
+      ctx.font = "20px monospace";
+      ctx.fillText("按空格键开始", canvas.width / 2, 356);
+
+      ctx.restore();
+    }
+
+    function drawLevelIntroScreen() {
+      drawGame();
+
+      const level = levels[currentLevelIndex];
+
+      ctx.save();
+
+      ctx.fillStyle = "rgba(8, 0, 18, 0.78)";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.fillStyle = "rgba(35, 0, 70, 0.94)";
+      ctx.shadowColor = "#ff5cf4";
+      ctx.shadowBlur = 24;
+      ctx.fillRect(76, 210, 488, 220);
+
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = "#ff77e9";
+      ctx.lineWidth = 4;
+      ctx.strokeRect(76, 210, 488, 220);
+
+      ctx.strokeStyle = "#ffd6ff";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(90, 224, 460, 192);
+
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+
+      ctx.shadowColor = "#ff7bff";
+      ctx.shadowBlur = 16;
+      ctx.fillStyle = "white";
+      ctx.font = "30px monospace";
+      ctx.fillText("LEVEL " + level.id, canvas.width / 2, 268);
+
+      ctx.shadowBlur = 8;
+      ctx.font = "20px monospace";
+      ctx.fillText(level.hintText, canvas.width / 2, 326);
+
+      const blink = 0.55 + Math.sin(performance.now() / 350) * 0.35;
+      ctx.shadowColor = "#7deaff";
+      ctx.shadowBlur = 12;
+      ctx.fillStyle = "rgba(223, 251, 255, " + blink + ")";
+      ctx.font = "18px monospace";
+      ctx.fillText("Press Enter to Start", canvas.width / 2, 380);
+
+      ctx.restore();
+    }
+
+    function drawOverlayTitle(title, y, instruction = "Press Enter to Restart") {
+      ctx.save();
+      ctx.fillStyle = "rgba(8, 0, 18, 0.76)";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+
+      ctx.shadowColor = "#ff7bff";
+      ctx.shadowBlur = 24;
+      ctx.fillStyle = "white";
+      ctx.font = "56px monospace";
+      ctx.fillText(title, canvas.width / 2, y);
+
+      const blink = 0.55 + Math.sin(performance.now() / 350) * 0.35;
+      ctx.shadowColor = "white";
+      ctx.shadowBlur = 12;
+      ctx.fillStyle = "rgba(255, 255, 255, " + blink + ")";
+      ctx.font = "20px monospace";
+      ctx.fillText(instruction, canvas.width / 2, y + 80);
+
+      ctx.restore();
+    }
+
+    function drawLevelCompleteScreen() {
+      drawGame();
+      drawOverlayTitle(
+        "Level Complete",
+        280,
+        "Press Enter for Next Level"
+      );
+      drawHud();
+    }
+
+    function drawWinScreen() {
+      drawGame();
+      drawOverlayTitle("You Win", 280);
+      drawHud();
+    }
+
+    function drawGameOverScreen() {
+      drawGame();
+      drawOverlayTitle("GAME OVER", 280);
+      drawHud();
+    }
+
+    function draw() {
+      if (gameState === "start") {
+        drawStartScreen();
+      } else if (gameState === "levelSelect") {
+        drawLevelSelectScreen();
+      } else if (gameState === "characterSelect") {
+        drawCharacterSelectScreen();
+      } else if (gameState === "levelIntro") {
+        drawLevelIntroScreen();
+      } else if (gameState === "playing") {
+        drawGame();
+      } else if (gameState === "hardRules") {
+        drawHardRulesScreen();
+      } else if (gameState === "paused") {
+        drawPauseMenu();
+      } else if (gameState === "levelComplete") {
+        drawLevelCompleteScreen();
+      } else if (gameState === "win") {
+        drawWinScreen();
+      } else if (gameState === "gameOver") {
+        drawGameOverScreen();
+      }
+    }
+
+
+    function gameLoop() {
+      updateButtons();
+
+      if (gameState === "playing") {
+        update();
+      }
+
+      draw();
+      requestAnimationFrame(gameLoop);
+    }
+
+    generateMaze();
+    gameLoop();
+  </script>
+</body>
+</html>
+```
