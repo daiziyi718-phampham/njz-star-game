@@ -149,6 +149,22 @@
     const LASER_DURATION = 10;
     const PIG_RESPAWN_TIME = 240;
     const DEBUG_MODE = true;
+    const UNLOCKED_LEVEL_STORAGE_KEY = "newjeansGameUnlockedLevel";
+    const ENEMY_SPEED_VALUES = {
+      slow: 1.5,
+      normal: 2,
+      fast: 2.5,
+      extreme: 3
+    };
+    const MAZE_DIFFICULTY_CONFIGS = {
+      easy: { wallChance: 0.18, blockCount: 12 },
+      "easy-medium": { wallChance: 0.21, blockCount: 15 },
+      medium: { wallChance: 0.25, blockCount: 18 },
+      "medium-complex": { wallChance: 0.28, blockCount: 22 },
+      complex: { wallChance: 0.3, blockCount: 24 },
+      "complex-plus": { wallChance: 0.32, blockCount: 26 },
+      "final-complex": { wallChance: 0.34, blockCount: 28 }
+    };
 
     const player = {
       x: TILE_SIZE + 4,
@@ -212,9 +228,12 @@
     let previewCharacterIndex = 0;
     let laserCooldown = 0;
     let laserShotsRemaining = 0;
+    let remainingTimeSeconds = null;
+    let lastCountdownTimestamp = null;
     let facingDirection = { dx: 1, dy: 0 };
     let hardRulesShown = false;
     let levelIntroNextState = "playing";
+    let unlockedLevel = loadUnlockedLevel();
 
     const difficulties = [
       { name: "EASY", stars: 10, enemies: 1, wallChance: 0.18, blockCount: 12 },
@@ -452,8 +471,51 @@
       return levels[currentLevelIndex]?.enemyRespawn === true;
     }
 
+    function loadUnlockedLevel() {
+      try {
+        const storedValue = Number(
+          localStorage.getItem(UNLOCKED_LEVEL_STORAGE_KEY)
+        );
+
+        if (!Number.isInteger(storedValue)) {
+          return 1;
+        }
+
+        return Math.min(
+          levels.length,
+          Math.max(1, storedValue)
+        );
+      } catch (error) {
+        return 1;
+      }
+    }
+
+    function saveUnlockedLevel() {
+      try {
+        localStorage.setItem(
+          UNLOCKED_LEVEL_STORAGE_KEY,
+          String(unlockedLevel)
+        );
+      } catch (error) {
+        // localStorage 不可用时保留当前会话内的解锁进度。
+      }
+    }
+
+    function unlockNextLevel() {
+      if (debugLevelSelectMode) return;
+      if (currentLevelIndex >= levels.length - 1) return;
+
+      const nextLevelNumber = currentLevelIndex + 2;
+
+      if (nextLevelNumber > unlockedLevel) {
+        unlockedLevel = nextLevelNumber;
+        saveUnlockedLevel();
+      }
+    }
+
     function pauseGame() {
       gameState = "paused";
+      lastCountdownTimestamp = null;
       selectedPauseOption = 0;
       clearArrowKeys();
     }
@@ -640,8 +702,17 @@
       return true;
     }
 
-    function generateMaze() {
-      const config = difficulties[selectedDifficulty];
+    function getMazeDifficultyConfig(difficultyName) {
+      return (
+        MAZE_DIFFICULTY_CONFIGS[difficultyName] ??
+        MAZE_DIFFICULTY_CONFIGS.easy
+      );
+    }
+
+    function generateMaze(level) {
+      const config = getMazeDifficultyConfig(
+        level?.maze?.difficulty
+      );
       const grid = makeEmptyMaze();
 
       for (let i = 0; i < config.blockCount; i++) {
@@ -952,11 +1023,38 @@
       enemy.moveTimer = 20;
     }
 
-    function generateEnemies(amount) {
+    function getEnemySpeed(speedName) {
+      return (
+        ENEMY_SPEED_VALUES[speedName] ??
+        ENEMY_SPEED_VALUES.normal
+      );
+    }
+
+    function buildEnemySpawnConfigs(enemyGroups) {
+      const spawnConfigs = [];
+
+      enemyGroups.forEach((group, groupIndex) => {
+        for (let i = 0; i < group.count; i++) {
+          spawnConfigs.push({
+            groupIndex,
+            group
+          });
+        }
+      });
+
+      return spawnConfigs;
+    }
+
+    function generateEnemies(enemySpawnConfigs) {
       enemies = [];
       let attempts = 0;
 
-      while (enemies.length < amount && attempts < 8000) {
+      while (
+        enemies.length < enemySpawnConfigs.length &&
+        attempts < 8000
+      ) {
+        const spawnConfig = enemySpawnConfigs[enemies.length];
+        const sourceGroup = spawnConfig.group;
         const size = 32;
         const tile = isHardMode() ? pigHomeSpawnTile(enemies.length) : randomPathTile(260);
         const x = tile.col * TILE_SIZE + 4;
@@ -976,7 +1074,10 @@
             homeX: x,
             homeY: y,
             size,
-            speed: 2,
+            speed: getEnemySpeed(sourceGroup.speed),
+            speedName: sourceGroup.speed,
+            sourceGroupIndex: spawnConfig.groupIndex,
+            sourceGroup,
             dx: 0,
             dy: 0,
             moveTimer: 0,
@@ -1009,10 +1110,8 @@
 
     function startGame() {
       const level = levels[currentLevelIndex];
-      const enemyCount = level.enemyGroups.reduce(
-        (total, group) => total + group.count,
-        0
-      );
+      const enemySpawnConfigs =
+        buildEnemySpawnConfigs(level.enemyGroups);
 
       score = 0;
       lives = 3;
@@ -1024,6 +1123,12 @@
         typeof level.laserLimit === "number"
           ? level.laserLimit
           : 0;
+      remainingTimeSeconds =
+        typeof level.timeLimitSeconds === "number" &&
+        level.timeLimitSeconds > 0
+          ? level.timeLimitSeconds
+          : null;
+      lastCountdownTimestamp = null;
       lasers = [];
       facingDirection = { dx: 1, dy: 0 };
       player.x = player.startX;
@@ -1032,11 +1137,11 @@
             let starsGenerated = false;
 
       while (!starsGenerated) {
-        generateMaze();
+        generateMaze(level);
         starsGenerated = generateStars(level.starCount);
       }
 
-      generateEnemies(enemyCount);
+      generateEnemies(enemySpawnConfigs);
 
       levelIntroNextState =
         isHardMode() && !hardRulesShown
@@ -1063,10 +1168,36 @@
       });
 
       if (stars.length > 0 && score >= stars.length) {
+        unlockNextLevel();
         gameState =
           currentLevelIndex < levels.length - 1
             ? "levelComplete"
             : "win";
+        clearArrowKeys();
+      }
+    }
+
+    function updateCountdown(timestamp) {
+      if (remainingTimeSeconds === null) return;
+
+      if (lastCountdownTimestamp === null) {
+        lastCountdownTimestamp = timestamp;
+        return;
+      }
+
+      const elapsedSeconds =
+        Math.max(0, timestamp - lastCountdownTimestamp) / 1000;
+      lastCountdownTimestamp = timestamp;
+      remainingTimeSeconds = Math.max(
+        0,
+        remainingTimeSeconds - elapsedSeconds
+      );
+
+      if (remainingTimeSeconds <= 0) {
+        remainingTimeSeconds = 0;
+        lastCountdownTimestamp = null;
+        lives = 0;
+        gameState = "gameOver";
         clearArrowKeys();
       }
     }
@@ -1561,6 +1692,27 @@
       ctx.restore();
     }
 
+    function drawTimeHud() {
+      if (remainingTimeSeconds === null) return;
+
+      const displaySeconds = Math.ceil(remainingTimeSeconds);
+      const isLowTime = remainingTimeSeconds <= 10;
+
+      ctx.save();
+      ctx.fillStyle = isLowTime ? "#ff5c7a" : "white";
+      ctx.shadowColor = isLowTime ? "#ff304f" : "#7deaff";
+      ctx.shadowBlur = isLowTime ? 14 : 8;
+      ctx.font = "20px monospace";
+      ctx.textAlign = "right";
+      ctx.textBaseline = "top";
+      ctx.fillText(
+        "TIME: " + displaySeconds,
+        canvas.width - 18,
+        14
+      );
+      ctx.restore();
+    }
+
     function drawHud() {
       ctx.save();
       ctx.fillStyle = "white";
@@ -1574,6 +1726,7 @@
 
       drawHearts();
       drawLaserHud();
+      drawTimeHud();
     }
 
     function drawStartScreen() {
@@ -1698,7 +1851,7 @@
     }
 
     function isLevelUnlocked(levelIndex) {
-      return levelIndex === 0;
+      return levelIndex + 1 <= unlockedLevel;
     }
 
     function isDebugLevelShortcutPressed() {
@@ -2046,18 +2199,24 @@
     }
 
 
-    function gameLoop() {
+    function gameLoop(timestamp) {
       updateButtons();
 
       if (gameState === "playing") {
-        update();
+        updateCountdown(timestamp);
+
+        if (gameState === "playing") {
+          update();
+        }
+      } else {
+        lastCountdownTimestamp = null;
       }
 
       draw();
       requestAnimationFrame(gameLoop);
     }
 
-    generateMaze();
+    generateMaze(levels[currentLevelIndex]);
     gameLoop();
   </script>
 </body>
