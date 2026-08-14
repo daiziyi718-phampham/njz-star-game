@@ -39,7 +39,7 @@ window.LEVELS = [
   },
   {
     id: 3,
-    prompt: "找到安全路线避开猪猪！",
+    prompt: "小心靠近星星的猪",
     enemyGroups: [{ type: "normal", count: 1, speed: "slow" }],
     maze: { difficulty: "easy-medium", features: [] },
     starCount: 8,
@@ -49,7 +49,7 @@ window.LEVELS = [
   },
   {
     id: 4,
-    prompt: "使用激光消灭敌人吧！",
+    prompt: "按下空格消灭邪恶猪猪",
     enemyGroups: [{ type: "normal", count: 1, speed: "slow" }],
     maze: { difficulty: "medium", features: [] },
     starCount: 10,
@@ -93,13 +93,13 @@ window.LEVELS = [
     enemyGroups: [{ type: "normal", count: 3, speed: "fast" }],
     maze: { difficulty: "medium", features: [] },
     starCount: 12,
-    timeLimitSeconds: 90,
+    timeLimitSeconds: 30,
     laser: { mode: "unlimited", maxShots: null },
     characterEasterEgg: null
   },
   {
     id: 9,
-    prompt: "更多星星等待你的发现！",
+    prompt: "需要收集更多星星",
     enemyGroups: [{ type: "normal", count: 3, speed: "fast" }],
     maze: { difficulty: "medium", features: [] },
     starCount: 18,
@@ -113,13 +113,13 @@ window.LEVELS = [
     enemyGroups: [{ type: "normal", count: 3, speed: "fast" }],
     maze: { difficulty: "medium-complex", features: [] },
     starCount: 18,
-    timeLimitSeconds: 120,
+    timeLimitSeconds: 30,
     laser: { mode: "unlimited", maxShots: null },
     characterEasterEgg: null
   },
   {
     id: 11,
-    prompt: "不要浪费你的能量！",
+    prompt: "不要浪费你的激光",
     enemyGroups: [{ type: "normal", count: 3, speed: "normal" }],
     maze: { difficulty: "medium-complex", features: [] },
     starCount: 18,
@@ -129,7 +129,7 @@ window.LEVELS = [
   },
   {
     id: 12,
-    prompt: "猪猪又回来了！",
+    prompt: "猪猪学会了复活",
     enemyGroups: [{ type: "respawning", count: 3, speed: "normal" }],
     maze: { difficulty: "medium-complex", features: [] },
     starCount: 18,
@@ -149,8 +149,10 @@ window.LEVELS = [
   },
   {
     id: 14,
-    prompt: "找到最快的路线！",
-    enemyGroups: [{ type: "respawning", count: 3, speed: "normal" }],
+    prompt: "小心！猪猪开始追你了！",
+    enemyGroups: [
+      { type: "accelerating", count: 3, speed: "normal", abilities: ["respawn"] }
+    ],
     maze: { difficulty: "complex", features: [] },
     starCount: 22,
     timeLimitSeconds: null,
@@ -159,18 +161,22 @@ window.LEVELS = [
   },
   {
     id: 15,
-    prompt: "做好准备迎接挑战！",
-    enemyGroups: [{ type: "respawning", count: 3, speed: "normal" }],
+    prompt: "时间有限，别被猪猪追上！",
+    enemyGroups: [
+      { type: "accelerating", count: 3, speed: "normal", abilities: ["respawn"] }
+    ],
     maze: { difficulty: "complex", features: [] },
     starCount: 22,
-    timeLimitSeconds: 120,
+    timeLimitSeconds: 30,
     laser: { mode: "limited", maxShots: 3 },
     characterEasterEgg: 4
   },
   {
     id: 16,
-    prompt: "更复杂的迷宫出现了！",
-    enemyGroups: [{ type: "respawning", count: 3, speed: "normal" }],
+    prompt: "别让猪猪追上你！",
+    enemyGroups: [
+      { type: "accelerating", count: 3, speed: "normal", abilities: ["respawn"] }
+    ],
     maze: {
       difficulty: "complex-plus",
       features: ["dead-ends", "long-routes", "multiple-branches"]
@@ -183,7 +189,9 @@ window.LEVELS = [
   {
     id: 17,
     prompt: "更多猪猪正在靠近！",
-    enemyGroups: [{ type: "respawning", count: 4, speed: "normal" }],
+    enemyGroups: [
+      { type: "accelerating", count: 4, speed: "normal", abilities: ["respawn"] }
+    ],
     maze: { difficulty: "complex-plus", features: [] },
     starCount: 24,
     timeLimitSeconds: null,
@@ -192,8 +200,10 @@ window.LEVELS = [
   },
   {
     id: 18,
-    prompt: "猪猪的速度突破极限！",
-    enemyGroups: [{ type: "respawning", count: 4, speed: "extreme" }],
+    prompt: "猪猪变得更快了！",
+    enemyGroups: [
+      { type: "accelerating", count: 4, speed: "extreme", abilities: ["respawn"] }
+    ],
     maze: { difficulty: "complex-plus", features: [] },
     starCount: 24,
     timeLimitSeconds: null,
@@ -202,8 +212,11 @@ window.LEVELS = [
   },
   {
     id: 19,
-    prompt: "猪猪堵住了前进道路！",
-    enemyGroups: [{ type: "respawning", count: 4, speed: "extreme" }],
+    prompt: "小心！猪猪被消灭后会分裂！",
+    enemyGroups: [
+      { type: "accelerating", count: 3, speed: "extreme" },
+      { type: "splitting", count: 1, speed: "extreme" }
+    ],
     maze: {
       difficulty: "complex-plus",
       features: ["narrow-passages", "congestion-zones"]
@@ -216,16 +229,19 @@ window.LEVELS = [
   {
     id: 20,
     prompt: "展现你的最佳策略！",
-    enemyGroups: [{ type: "respawning", count: 4, speed: "extreme" }],
+    enemyGroups: [
+      { type: "accelerating", count: 3, speed: "extreme" },
+      { type: "splitting", count: 1, speed: "extreme" }
+    ],
     maze: { difficulty: "complex-plus", features: [] },
     starCount: 24,
-    timeLimitSeconds: 120,
+    timeLimitSeconds: 60,
     laser: { mode: "limited", maxShots: 5 },
     characterEasterEgg: null
   },
   {
     id: 21,
-    prompt: "猪猪学会追逐了！",
+    prompt: "猪猪变得更加凶猛了！",
     enemyGroups: [{ type: "accelerating", count: 5, speed: "extreme" }],
     maze: { difficulty: "complex-plus", features: [] },
     starCount: 28,
@@ -235,9 +251,9 @@ window.LEVELS = [
   },
   {
     id: 22,
-    prompt: "听说猪猪还会分裂？",
+    prompt: "分裂猪变多了！",
     enemyGroups: [
-      { type: "normal", count: 3, speed: "extreme" },
+      { type: "accelerating", count: 3, speed: "extreme" },
       { type: "splitting", count: 2, speed: "extreme" }
     ],
     maze: { difficulty: "complex-plus", features: [] },
@@ -248,9 +264,9 @@ window.LEVELS = [
   },
   {
     id: 23,
-    prompt: "迷宫里出现了神秘通道！",
+    prompt: "小心越来越多的猪猪！",
     enemyGroups: [
-      { type: "normal", count: 3, speed: "extreme" },
+      { type: "accelerating", count: 3, speed: "extreme" },
       { type: "splitting", count: 2, speed: "extreme" }
     ],
     maze: { difficulty: "complex-plus", features: ["portals"] },
@@ -261,7 +277,7 @@ window.LEVELS = [
   },
   {
     id: 24,
-    prompt: "猪猪已经变得非常强大！",
+    prompt: "猪猪的力量已经变得非常庞大。",
     enemyGroups: [
       {
         type: "accelerating",
@@ -278,7 +294,7 @@ window.LEVELS = [
   },
   {
     id: 25,
-    prompt: "最后的冒险开始了！",
+    prompt: "最后的决战！",
     enemyGroups: [
       {
         type: "accelerating",
@@ -289,7 +305,7 @@ window.LEVELS = [
     ],
     maze: { difficulty: "final-complex", features: ["portals"] },
     starCount: 28,
-    timeLimitSeconds: 120,
+    timeLimitSeconds: 60,
     laser: { mode: "limited", maxShots: 3 },
     characterEasterEgg: null
   }
