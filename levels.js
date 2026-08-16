@@ -173,13 +173,15 @@ window.LEVELS = [
   },
   {
     id: 16,
-    prompt: "别让猪猪追上你！",
+    prompt: "运用隧道逃离猪猪吧",
     enemyGroups: [
       { type: "accelerating", count: 3, speed: "normal", abilities: ["respawn"] }
     ],
     maze: {
       difficulty: "complex-plus",
-      features: ["dead-ends", "long-routes", "multiple-branches"]
+      features: ["dead-ends", "long-routes", "multiple-branches", "portals"],
+      portalPairs: 1,
+      portalLayout: "teaching"
     },
     starCount: 24,
     timeLimitSeconds: null,
@@ -242,7 +244,9 @@ window.LEVELS = [
   {
     id: 21,
     prompt: "猪猪变得更加凶猛了！",
-    enemyGroups: [{ type: "accelerating", count: 5, speed: "extreme" }],
+    enemyGroups: [
+      { type: "accelerating", count: 5, speed: "extreme", baseSpeed: 3 }
+    ],
     maze: { difficulty: "complex-plus", features: [] },
     starCount: 28,
     timeLimitSeconds: null,
@@ -253,8 +257,8 @@ window.LEVELS = [
     id: 22,
     prompt: "分裂猪变多了！",
     enemyGroups: [
-      { type: "accelerating", count: 3, speed: "extreme" },
-      { type: "splitting", count: 2, speed: "extreme" }
+      { type: "accelerating", count: 3, speed: "extreme", baseSpeed: 3 },
+      { type: "splitting", count: 2, speed: "extreme", baseSpeed: 3 }
     ],
     maze: { difficulty: "complex-plus", features: [] },
     starCount: 28,
@@ -266,10 +270,15 @@ window.LEVELS = [
     id: 23,
     prompt: "小心越来越多的猪猪！",
     enemyGroups: [
-      { type: "accelerating", count: 3, speed: "extreme" },
-      { type: "splitting", count: 2, speed: "extreme" }
+      { type: "accelerating", count: 3, speed: "extreme", baseSpeed: 3 },
+      { type: "splitting", count: 2, speed: "extreme", baseSpeed: 3 }
     ],
-    maze: { difficulty: "complex-plus", features: ["portals"] },
+    maze: {
+      difficulty: "complex-plus",
+      features: ["portals"],
+      portalPairs: 2,
+      portalLayout: "quadrants"
+    },
     starCount: 28,
     timeLimitSeconds: null,
     laser: { mode: "unlimited", maxShots: null },
@@ -283,6 +292,7 @@ window.LEVELS = [
         type: "accelerating",
         count: 5,
         speed: "extreme",
+        baseSpeed: 3,
         abilities: ["split"]
       }
     ],
@@ -300,6 +310,7 @@ window.LEVELS = [
         type: "accelerating",
         count: 5,
         speed: "extreme",
+        baseSpeed: 3,
         abilities: ["split"]
       }
     ],

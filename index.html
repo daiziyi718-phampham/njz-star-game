@@ -7,6 +7,14 @@
   <title>NJZ Star Maze</title>
 
   <style>
+    @font-face {
+      font-family: "Fusion Pixel SC";
+      src: url("assets/fonts/fusion-pixel-12px-sc.woff2") format("woff2");
+      font-display: swap;
+      font-style: normal;
+      font-weight: 400;
+    }
+
     html,
     body {
       width: 100%;
@@ -133,6 +141,7 @@
     const ctx = canvas.getContext("2d");
     const homeButton = document.getElementById("homeButton");
     const levels = window.LEVELS;
+    const PIXEL_UI_FONT = '"Fusion Pixel SC", monospace';
 
     const TILE_SIZE = 40;
     const GRID_COLS = canvas.width / TILE_SIZE;
@@ -148,12 +157,14 @@
     const LASER_COOLDOWN = 600;
     const LASER_DURATION = 10;
     const PIG_RESPAWN_TIME = 240;
+    const PIG_RESPAWN_WARNING_TIME = 120;
     const SPLIT_CHILD_SIZE_SCALE = 0.65;
     const CHASE_DETECTION_RANGE = 240;
     const CHASE_DURATION = 45;
     const CHASE_COOLDOWN = 90;
     const CHASE_SPEED_MULTIPLIER = 1.3;
-    const EXTREME_CHASE_SPEED_MULTIPLIER = 1.3;
+    const EXTREME_CHASE_SPEED_MULTIPLIER = 1.1;
+    const PORTAL_REENTRY_COOLDOWN_FRAMES = 4;
     const DEBUG_MODE = true;
     const UNLOCKED_LEVEL_STORAGE_KEY = "newjeansGameUnlockedLevel";
     const ENEMY_SPEED_VALUES = {
@@ -225,6 +236,9 @@
     let pendingEnemySpawns = [];
     let lasers = [];
     let maze = [];
+    let portals = [];
+    let portalExitLock = null;
+    let portalCooldown = 0;
     let currentLevelIndex = 0;
     let selectedDifficulty = 0;
     let selectedStartOption = 0;
@@ -751,6 +765,8 @@
       if (isHardMode()) {
         carvePigHome();
       }
+
+      generatePortals(level);
     }
         function carvePigHome() {
       const wallTiles = [
@@ -872,13 +888,301 @@
       };
     }
 
-    function randomPathTile(minDistanceFromStart) {
+    function tileKey(col, row) {
+      return col + "," + row;
+    }
+
+    function getPathDistances(startTile) {
+      const distances = new Map([[tileKey(startTile.col, startTile.row), 0]]);
+      const queue = [startTile];
+
+      for (let index = 0; index < queue.length; index++) {
+        const current = queue[index];
+        const currentDistance = distances.get(tileKey(current.col, current.row));
+
+        tileNeighbors(current.col, current.row).forEach(next => {
+          const key = tileKey(next.col, next.row);
+          if (
+            next.col > 0 && next.col < GRID_COLS - 1 &&
+            next.row > 0 && next.row < GRID_ROWS - 1 &&
+            maze[next.row][next.col] === PATH &&
+            !distances.has(key)
+          ) {
+            distances.set(key, currentDistance + 1);
+            queue.push(next);
+          }
+        });
+      }
+
+      return distances;
+    }
+
+    function isPortalTile(col, row) {
+      return portals.some(portal => portal.col === col && portal.row === row);
+    }
+
+    function getSpawnRouteProtectedTiles(startTile) {
+      const protectedTiles = new Set([tileKey(startTile.col, startTile.row)]);
+      const reachableCount = getPathDistances(startTile).size;
+
+      getPathTiles(maze).forEach(blockedTile => {
+        const blockedKey = tileKey(blockedTile.col, blockedTile.row);
+        if (blockedKey === tileKey(startTile.col, startTile.row)) return;
+
+        const visited = new Set([tileKey(startTile.col, startTile.row)]);
+        const queue = [startTile];
+
+        for (let index = 0; index < queue.length; index++) {
+          const current = queue[index];
+          tileNeighbors(current.col, current.row).forEach(next => {
+            const key = tileKey(next.col, next.row);
+            if (
+              key !== blockedKey &&
+              next.col > 0 && next.col < GRID_COLS - 1 &&
+              next.row > 0 && next.row < GRID_ROWS - 1 &&
+              maze[next.row][next.col] === PATH &&
+              !visited.has(key)
+            ) {
+              visited.add(key);
+              queue.push(next);
+            }
+          });
+        }
+
+        // 移除该格会切断出生点与其他道路，它就是唯一必经路线的一部分。
+        if (visited.size < reachableCount - 1) protectedTiles.add(blockedKey);
+      });
+
+      return protectedTiles;
+    }
+
+    function findTeachingPortalPair(candidates, fromStart) {
+      const nearCandidates = candidates.filter(tile => {
+        const startDistance = fromStart.get(tileKey(tile.col, tile.row));
+        return startDistance >= 2 && startDistance <= 5;
+      });
+      const farCandidates = candidates.filter(tile => (
+        fromStart.get(tileKey(tile.col, tile.row)) >= 10
+      ));
+      let bestPair = null;
+      let bestScore = -Infinity;
+
+      for (const entrance of nearCandidates) {
+        const fromEntrance = getPathDistances(entrance);
+
+        for (const exit of farCandidates) {
+          const routeDistance = fromEntrance.get(tileKey(exit.col, exit.row));
+          if (routeDistance === undefined || routeDistance < 10) continue;
+
+          const score =
+            routeDistance * 3 +
+            fromStart.get(tileKey(exit.col, exit.row)) -
+            fromStart.get(tileKey(entrance.col, entrance.row));
+
+          if (score > bestScore) {
+            bestScore = score;
+            bestPair = [entrance, exit];
+          }
+        }
+      }
+
+      return bestPair;
+    }
+
+    function findQuadrantPortalPairs(candidates) {
+      const centerCol = GRID_COLS / 2;
+      const centerRow = GRID_ROWS / 2;
+      const quadrantMargin = 1;
+      const minimumRouteDistance = 6;
+      const quadrantConfigs = [
+        {
+          target: { col: 2, row: 2 },
+          matches: tile =>
+            tile.col < centerCol - quadrantMargin &&
+            tile.row < centerRow - quadrantMargin
+        },
+        {
+          target: { col: GRID_COLS - 3, row: GRID_ROWS - 3 },
+          matches: tile =>
+            tile.col > centerCol + quadrantMargin - 1 &&
+            tile.row > centerRow + quadrantMargin - 1
+        },
+        {
+          target: { col: GRID_COLS - 3, row: 2 },
+          matches: tile =>
+            tile.col > centerCol + quadrantMargin - 1 &&
+            tile.row < centerRow - quadrantMargin
+        },
+        {
+          target: { col: 2, row: GRID_ROWS - 3 },
+          matches: tile =>
+            tile.col < centerCol - quadrantMargin &&
+            tile.row > centerRow + quadrantMargin - 1
+        }
+      ];
+      const selected = [];
+
+      for (const config of quadrantConfigs) {
+        const quadrantCandidates = candidates
+          .filter(config.matches)
+          .sort((tileA, tileB) => {
+            const distanceA =
+              Math.abs(tileA.col - config.target.col) +
+              Math.abs(tileA.row - config.target.row);
+            const distanceB =
+              Math.abs(tileB.col - config.target.col) +
+              Math.abs(tileB.row - config.target.row);
+            return distanceA - distanceB;
+          });
+        const selectedTile = quadrantCandidates.find(candidate => {
+          const distances = getPathDistances(candidate);
+          return selected.every(tile => (
+            distances.get(tileKey(tile.col, tile.row)) >= minimumRouteDistance
+          ));
+        });
+
+        if (!selectedTile) return null;
+        selected.push(selectedTile);
+      }
+
+      return [
+        [selected[0], selected[1]],
+        [selected[2], selected[3]]
+      ];
+    }
+
+    function generatePortals(level) {
+      portals = [];
+      portalExitLock = null;
+      portalCooldown = 0;
+
+      const features = level?.maze?.features ?? [];
+      const pairCount = Math.max(0, Math.floor(level?.maze?.portalPairs ?? 0));
+      if (!features.includes("portals") || pairCount === 0) return;
+
+      const startTile = {
+        col: Math.floor((player.startX + player.size / 2) / TILE_SIZE),
+        row: Math.floor((player.startY + player.size / 2) / TILE_SIZE)
+      };
+      const fromStart = getPathDistances(startTile);
+      const spawnRouteProtectedTiles = getSpawnRouteProtectedTiles(startTile);
+      const validCandidates = getPathTiles(maze).filter(tile => {
+        const startDistance = fromStart.get(tileKey(tile.col, tile.row));
+        return (
+          startDistance !== undefined &&
+          countPathNeighbors(maze, tile.col, tile.row) >= 2 &&
+          !isReservedTile(tile.col, tile.row) &&
+          !spawnRouteProtectedTiles.has(tileKey(tile.col, tile.row)) &&
+          !isPigHomeProtectedTile(tile.col, tile.row)
+        );
+      });
+      const candidates = validCandidates.filter(tile => (
+        fromStart.get(tileKey(tile.col, tile.row)) >= 5
+      ));
+      const used = new Set();
+      let firstRandomPairId = 0;
+
+      if (
+        level?.maze?.portalLayout === "quadrants" &&
+        pairCount === 2
+      ) {
+        const quadrantPairs = findQuadrantPortalPairs(validCandidates);
+
+        if (quadrantPairs) {
+          quadrantPairs.forEach((pair, pairId) => {
+            pair.forEach((tile, endpoint) => {
+              portals.push({ ...tile, pairId, endpoint });
+            });
+          });
+        }
+
+        return;
+      }
+
+      if (level?.maze?.portalLayout === "teaching") {
+        const teachingPair = findTeachingPortalPair(validCandidates, fromStart);
+
+        if (teachingPair) {
+          teachingPair.forEach((tile, endpoint) => {
+            used.add(tileKey(tile.col, tile.row));
+            portals.push({ ...tile, pairId: 0, endpoint });
+          });
+          firstRandomPairId = 1;
+        }
+      }
+
+      for (let pairId = firstRandomPairId; pairId < pairCount; pairId++) {
+        let bestPair = null;
+        let bestScore = -Infinity;
+
+        for (const entrance of candidates) {
+          if (used.has(tileKey(entrance.col, entrance.row))) continue;
+          const fromEntrance = getPathDistances(entrance);
+
+          for (const exit of candidates) {
+            const exitKey = tileKey(exit.col, exit.row);
+            if (exit === entrance || used.has(exitKey)) continue;
+            const routeDistance = fromEntrance.get(exitKey);
+            if (routeDistance === undefined || routeDistance < 8) continue;
+
+            const startValue = Math.min(
+              fromStart.get(tileKey(entrance.col, entrance.row)),
+              fromStart.get(exitKey)
+            );
+            const score = routeDistance * 3 + startValue;
+            if (score > bestScore) {
+              bestScore = score;
+              bestPair = [entrance, exit];
+            }
+          }
+        }
+
+        if (!bestPair) break;
+        bestPair.forEach((tile, endpoint) => {
+          used.add(tileKey(tile.col, tile.row));
+          portals.push({ ...tile, pairId, endpoint });
+        });
+      }
+    }
+
+    function updatePlayerPortal() {
+      if (portalCooldown > 0) portalCooldown--;
+
+      const col = Math.floor((player.x + player.size / 2) / TILE_SIZE);
+      const row = Math.floor((player.y + player.size / 2) / TILE_SIZE);
+      const currentKey = tileKey(col, row);
+
+      if (portalExitLock !== null) {
+        if (currentKey !== portalExitLock && portalCooldown <= 0) {
+          portalExitLock = null;
+        }
+        return;
+      }
+      if (portalCooldown > 0) return;
+
+      const entrance = portals.find(portal => portal.col === col && portal.row === row);
+      if (!entrance) return;
+      const exit = portals.find(portal => (
+        portal.pairId === entrance.pairId && portal.endpoint !== entrance.endpoint
+      ));
+      if (!exit) return;
+
+      player.x = exit.col * TILE_SIZE + (TILE_SIZE - player.size) / 2;
+      player.y = exit.row * TILE_SIZE + (TILE_SIZE - player.size) / 2;
+      portalExitLock = tileKey(exit.col, exit.row);
+      portalCooldown = PORTAL_REENTRY_COOLDOWN_FRAMES;
+    }
+
+    function randomPathTile(minDistanceFromStart, extraFilter = () => true) {
       const pathTiles = shuffle(getPathTiles(maze).filter(tile => {
         const center = tileCenter(tile.col, tile.row);
         const startCenterX = player.startX + player.size / 2;
         const startCenterY = player.startY + player.size / 2;
 
-        return distance(center.x, center.y, startCenterX, startCenterY) >= minDistanceFromStart;
+        return (
+          distance(center.x, center.y, startCenterX, startCenterY) >= minDistanceFromStart &&
+          extraFilter(tile)
+        );
       }));
 
       return pathTiles[0] || { col: 1, row: 1 };
@@ -973,6 +1277,7 @@
         return (
           farFromPlayerStart &&
           hasBreathingRoom &&
+          !isPortalTile(tile.col, tile.row) &&
           !isPigHomeProtectedTile(tile.col, tile.row) &&
           !isNearPigHomeSpawn(center.x, center.y)
         );
@@ -1026,6 +1331,74 @@
       enemy.moveTimer = 20;
     }
 
+    function segmentIntersectsRect(x1, y1, x2, y2, left, top, right, bottom) {
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      let minTime = 0;
+      let maxTime = 1;
+      const edges = [
+        { direction: -dx, distance: x1 - left },
+        { direction: dx, distance: right - x1 },
+        { direction: -dy, distance: y1 - top },
+        { direction: dy, distance: bottom - y1 }
+      ];
+
+      for (const edge of edges) {
+        if (edge.direction === 0) {
+          if (edge.distance < 0) return false;
+          continue;
+        }
+
+        const time = edge.distance / edge.direction;
+
+        if (edge.direction < 0) {
+          if (time > maxTime) return false;
+          minTime = Math.max(minTime, time);
+        } else {
+          if (time < minTime) return false;
+          maxTime = Math.min(maxTime, time);
+        }
+      }
+
+      return true;
+    }
+
+    function isSightBlockedByWall(x1, y1, x2, y2) {
+      const startCol = Math.max(0, Math.floor(Math.min(x1, x2) / TILE_SIZE));
+      const endCol = Math.min(
+        GRID_COLS - 1,
+        Math.floor(Math.max(x1, x2) / TILE_SIZE)
+      );
+      const startRow = Math.max(0, Math.floor(Math.min(y1, y2) / TILE_SIZE));
+      const endRow = Math.min(
+        GRID_ROWS - 1,
+        Math.floor(Math.max(y1, y2) / TILE_SIZE)
+      );
+
+      for (let row = startRow; row <= endRow; row++) {
+        for (let col = startCol; col <= endCol; col++) {
+          if (maze[row][col] !== WALL) continue;
+
+          if (
+            segmentIntersectsRect(
+              x1,
+              y1,
+              x2,
+              y2,
+              col * TILE_SIZE,
+              row * TILE_SIZE,
+              (col + 1) * TILE_SIZE,
+              (row + 1) * TILE_SIZE
+            )
+          ) {
+            return true;
+          }
+        }
+      }
+
+      return false;
+    }
+
     function canEnemySeePlayer(enemy) {
       const enemyCenterX = enemy.x + enemy.size / 2;
       const enemyCenterY = enemy.y + enemy.size / 2;
@@ -1040,27 +1413,12 @@
 
       if (sightDistance >= CHASE_DETECTION_RANGE) return false;
 
-      const sampleCount = Math.ceil(sightDistance / 8);
-
-      for (let i = 1; i < sampleCount; i++) {
-        const progress = i / sampleCount;
-        const sampleX = enemyCenterX + (playerCenterX - enemyCenterX) * progress;
-        const sampleY = enemyCenterY + (playerCenterY - enemyCenterY) * progress;
-        const col = Math.floor(sampleX / TILE_SIZE);
-        const row = Math.floor(sampleY / TILE_SIZE);
-
-        if (
-          row < 0 ||
-          row >= GRID_ROWS ||
-          col < 0 ||
-          col >= GRID_COLS ||
-          maze[row][col] === WALL
-        ) {
-          return false;
-        }
-      }
-
-      return true;
+      return !isSightBlockedByWall(
+        enemyCenterX,
+        enemyCenterY,
+        playerCenterX,
+        playerCenterY
+      );
     }
 
     function chooseChaseDirection(enemy) {
@@ -1095,7 +1453,7 @@
 
     function startEnemyChase(enemy) {
       const speedMultiplier =
-        enemy.baseSpeed === ENEMY_SPEED_VALUES.extreme
+        enemy.speedName === "extreme"
           ? EXTREME_CHASE_SPEED_MULTIPLIER
           : CHASE_SPEED_MULTIPLIER;
 
@@ -1198,12 +1556,15 @@
           ...defaultAbilities,
           ...configuredAbilities
         ])];
-        const baseSpeed = getEnemySpeed(sourceGroup.speed);
+        const baseSpeed =
+          sourceGroup.baseSpeed ?? getEnemySpeed(sourceGroup.speed);
         const canRespawn =
           type !== "splitting" &&
           (sourceGroup.canRespawn ?? abilities.includes("respawn"));
         const size = 32;
-        const tile = isHardMode() ? pigHomeSpawnTile(enemies.length) : randomPathTile(260);
+        const tile = isHardMode()
+          ? pigHomeSpawnTile(enemies.length)
+          : randomPathTile(260, tile => !isPortalTile(tile.col, tile.row));
         const x = tile.col * TILE_SIZE + 4;
         const y = tile.row * TILE_SIZE + 4;
 
@@ -1264,6 +1625,8 @@
     function resetPlayer() {
       player.x = player.startX;
       player.y = player.startY;
+      portalExitLock = null;
+      portalCooldown = 0;
       invincibleTimer = 150;
       clearArrowKeys();
     }
@@ -1294,11 +1657,19 @@
       facingDirection = { dx: 1, dy: 0 };
       player.x = player.startX;
       player.y = player.startY;
+      portals = [];
+      portalExitLock = null;
+      portalCooldown = 0;
       clearArrowKeys();
             let starsGenerated = false;
 
       while (!starsGenerated) {
         generateMaze(level);
+        const requiredPortalCount =
+          (level.maze.features ?? []).includes("portals")
+            ? Math.max(0, Math.floor(level.maze.portalPairs ?? 0)) * 2
+            : 0;
+        if (portals.length !== requiredPortalCount) continue;
         starsGenerated = generateStars(level.starCount);
       }
 
@@ -1797,6 +2168,95 @@
       // 猪猪之家由 HARD 模式迷宫墙体本身围成，这里不额外绘制装饰盒子。
     }
 
+    function drawPortals() {
+      const colors = ["#55f6ff", "#ff67d4", "#9cff57", "#ffcf5a"];
+      const time = performance.now() / 500;
+      const animationFrame = Math.floor(performance.now() / 160);
+      const outerRing = [
+        [-8, -16, 16, 4],
+        [-12, -12, 4, 4], [8, -12, 4, 4],
+        [-16, -8, 4, 16], [12, -8, 4, 16],
+        [-12, 8, 4, 4], [8, 8, 4, 4],
+        [-8, 12, 16, 4]
+      ];
+      const innerRing = [
+        [-8, -12, 16, 4],
+        [-12, -8, 4, 16], [8, -8, 4, 16],
+        [-8, 8, 16, 4]
+      ];
+      const swirlFrames = [
+        [[-4, -8], [0, -8], [4, -4], [4, 0], [0, 4], [-4, 4]],
+        [[0, -8], [4, -8], [4, -4], [0, 0], [-4, 0], [-4, 4]],
+        [[4, -8], [4, -4], [0, -4], [-4, 0], [-4, 4], [0, 4]]
+      ];
+
+      portals.forEach(portal => {
+        const center = tileCenter(portal.col, portal.row);
+        const color = colors[portal.pairId % colors.length];
+        const frame = (animationFrame + portal.pairId + portal.endpoint) % swirlFrames.length;
+        const pulse = 1 + Math.sin(time + portal.pairId) * 0.08;
+
+        ctx.save();
+        ctx.translate(Math.round(center.x), Math.round(center.y));
+        ctx.scale(pulse, pulse);
+
+        // Restore the original soft halo and curved energy traces behind the
+        // pixel-built portal, while keeping its blocky structure on top.
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 22;
+        ctx.globalAlpha = 0.28;
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(0, 0, 16, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.globalAlpha = 0.85;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(0, 0, 11, -0.25, Math.PI * 1.15);
+        ctx.stroke();
+        ctx.globalAlpha = 0.65;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, 0, 6, Math.PI * 0.7, Math.PI * 2.05);
+        ctx.stroke();
+
+        // Dark, hard-edged opening with a sparse checker texture.
+        ctx.globalAlpha = 0.72;
+        ctx.fillStyle = "#080018";
+        ctx.fillRect(-12, -12, 24, 24);
+        ctx.globalAlpha = 0.14;
+        ctx.fillStyle = color;
+        for (let y = -8; y <= 4; y += 4) {
+          for (let x = -8; x <= 4; x += 4) {
+            if (((x + y) / 4 + frame) % 2 === 0) ctx.fillRect(x, y, 4, 4);
+          }
+        }
+
+        // Two square-pixel rings replace the former anti-aliased circles.
+        ctx.globalAlpha = 0.42;
+        outerRing.forEach(([x, y, width, height]) => ctx.fillRect(x, y, width, height));
+        ctx.globalAlpha = 1;
+        outerRing.forEach(([x, y, width, height]) => {
+          ctx.fillRect(x + Math.sign(x), y + Math.sign(y), width, height);
+        });
+        ctx.globalAlpha = 0.62;
+        innerRing.forEach(([x, y, width, height]) => ctx.fillRect(x, y, width, height));
+
+        // The inner block spiral keeps its three-frame pixel animation.
+        ctx.globalAlpha = 0.95;
+        swirlFrames[frame].forEach(([x, y], index) => {
+          ctx.globalAlpha = index < 2 ? 1 : 0.58;
+          ctx.fillRect(x, y, 4, 4);
+        });
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, 4, 4);
+        ctx.restore();
+      });
+    }
+
     function drawLaser(laser) {
       ctx.save();
 
@@ -1833,9 +2293,22 @@
     }
 
     function drawAlienPig(enemy) {
-      if (!enemy.active) return;
+      const isRespawnWarning =
+        !enemy.active &&
+        enemy.state === "respawning" &&
+        enemy.respawnTimer > 0 &&
+        enemy.respawnTimer <= PIG_RESPAWN_WARNING_TIME;
+
+      if (!enemy.active && !isRespawnWarning) return;
 
       const floatOffset = Math.sin(performance.now() / 180 + enemy.floatPhase) * 2;
+      const renderX = isRespawnWarning ? enemy.homeX : enemy.x;
+      const renderY = isRespawnWarning ? enemy.homeY : enemy.y;
+      const warningAlpha = isRespawnWarning
+        ? Math.floor(enemy.respawnTimer / 10) % 2 === 0
+          ? 0.5
+          : 0
+        : 1;
       const isSplittingParent = enemy.type === "splitting";
       const isSplitChild = enemy.type === "split-child";
       const bodyColor = isSplittingParent
@@ -1855,7 +2328,8 @@
           : "#ffb3f6";
 
       ctx.save();
-      ctx.translate(Math.round(enemy.x), Math.round(enemy.y + floatOffset));
+      ctx.globalAlpha = warningAlpha;
+      ctx.translate(Math.round(renderX), Math.round(renderY + floatOffset));
       ctx.scale(enemy.size / 32, enemy.size / 32);
 
       ctx.shadowColor = bodyColor;
@@ -1899,7 +2373,7 @@
       ctx.fillRect(15, 28, 5, 4);
       ctx.fillRect(24, 28, 5, 4);
 
-      ctx.globalAlpha = 0.72;
+      ctx.globalAlpha = warningAlpha * 0.72;
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(9, 7, 14, 2);
 
@@ -1930,9 +2404,11 @@
         facingDirection = { dx: 1, dy: 0 };
       }
 
-      if (canMoveTo(nextX, nextY)) {
+      const playerMoved = nextX !== player.x || nextY !== player.y;
+      if (playerMoved && canMoveTo(nextX, nextY)) {
         player.x = nextX;
         player.y = nextY;
+        updatePlayerPortal();
       }
 
       updateLasers();
@@ -2087,15 +2563,15 @@
       ctx.shadowColor = "#ff7bff";
       ctx.shadowBlur = 22;
       ctx.fillStyle = "white";
-      ctx.font = "52px monospace";
+      ctx.font = "52px " + PIXEL_UI_FONT;
       ctx.fillText("NJZ Star Maze", canvas.width / 2, 155);
 
       ctx.shadowColor = "#8b5cff";
       ctx.shadowBlur = 14;
-      ctx.font = "24px monospace";
+      ctx.font = "24px " + PIXEL_UI_FONT;
       ctx.fillText("NJZ don't be blue", canvas.width / 2, 210);
 
-      ctx.font = "24px monospace";
+      ctx.font = "24px " + PIXEL_UI_FONT;
 
       startOptions.forEach((option, index) => {
         const y = 292 + index * 48;
@@ -2127,7 +2603,7 @@
       ctx.shadowColor = "white";
       ctx.shadowBlur = 12;
       ctx.fillStyle = "rgba(255, 255, 255, " + blink + ")";
-      ctx.font = "20px monospace";
+      ctx.font = "20px " + PIXEL_UI_FONT;
       ctx.fillText("Press Enter", canvas.width / 2, 520);
 
       ctx.restore();
@@ -2217,7 +2693,7 @@
       ctx.shadowColor = "#ff7bff";
       ctx.shadowBlur = 22;
       ctx.fillStyle = "white";
-      ctx.font = "42px monospace";
+      ctx.font = "42px " + PIXEL_UI_FONT;
       ctx.fillText(
         debugLevelSelectMode
           ? "SELECT LEVEL [DEBUG]"
@@ -2264,14 +2740,14 @@
           isSelectable
             ? "#ffffff"
             : "rgba(255, 255, 255, 0.3)";
-        ctx.font = "22px monospace";
+        ctx.font = "22px " + PIXEL_UI_FONT;
         ctx.fillText(
           String(level.id).padStart(2, "0"),
           x + tileWidth / 2,
           y + 22
         );
 
-        ctx.font = "11px monospace";
+        ctx.font = "11px " + PIXEL_UI_FONT;
         ctx.fillText(
           debugLevelSelectMode
             ? "TEST"
@@ -2286,7 +2762,7 @@
       ctx.shadowColor = "#ff7bff";
       ctx.shadowBlur = 10;
       ctx.fillStyle = "rgba(255, 255, 255, 0.82)";
-      ctx.font = "16px monospace";
+      ctx.font = "16px " + PIXEL_UI_FONT;
       ctx.fillText(
         "Arrow Keys Select   Enter Start   Esc Back",
         canvas.width / 2,
@@ -2300,6 +2776,7 @@
       drawBackground();
       drawMazeWalls();
       drawPigHome();
+      drawPortals();
 
       const time = performance.now() / 300;
 
