@@ -288,15 +288,10 @@ window.LEVELS = [
     id: 24,
     prompt: "猪猪的力量已经变得非常庞大。",
     enemyGroups: [
-      {
-        type: "accelerating",
-        count: 5,
-        speed: "extreme",
-        baseSpeed: 3,
-        abilities: ["split"]
-      }
+      { type: "accelerating", count: 3, speed: "extreme", baseSpeed: 3 },
+      { type: "splitting", count: 2, speed: "extreme", baseSpeed: 3 }
     ],
-    maze: { difficulty: "complex-plus", features: ["portals"] },
+    maze: { difficulty: "complex-plus", features: ["portals"], portalPairs: 2 },
     starCount: 28,
     timeLimitSeconds: null,
     laser: { mode: "limited", maxShots: 3 },
@@ -304,19 +299,14 @@ window.LEVELS = [
   },
   {
     id: 25,
-    prompt: "最后的决战！",
+    prompt: "最后的决战！在120s内完成战斗！",
     enemyGroups: [
-      {
-        type: "accelerating",
-        count: 5,
-        speed: "extreme",
-        baseSpeed: 3,
-        abilities: ["split"]
-      }
+      { type: "accelerating", count: 3, speed: "extreme", baseSpeed: 3 },
+      { type: "splitting", count: 2, speed: "extreme", baseSpeed: 3 }
     ],
-    maze: { difficulty: "final-complex", features: ["portals"] },
+    maze: { difficulty: "final-complex", features: ["portals"], portalPairs: 2 },
     starCount: 28,
-    timeLimitSeconds: 60,
+    timeLimitSeconds: 120,
     laser: { mode: "limited", maxShots: 3 },
     characterEasterEgg: null
   }

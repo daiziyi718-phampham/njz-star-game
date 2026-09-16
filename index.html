@@ -125,15 +125,37 @@
         24px 28px #1a0030;
       filter: drop-shadow(0 0 5px white);
     }
+    .audio-controls {
+      position: absolute;
+      bottom: 10px;
+      right: 10px;
+      display: flex;
+      gap: 6px;
+    }
+    .audio-controls button {
+      color: white;
+      background: rgba(28, 0, 48, 0.9);
+      border: 1px solid #bd8cff;
+      padding: 5px 8px;
+      font-family: "Fusion Pixel SC", monospace;
+      cursor: pointer;
+    }
+    .audio-controls button[aria-pressed="false"] { color: #aaa; }
+    .audio-controls button:focus-visible { outline: 2px solid #ff5cf4; }
   </style>
 </head>
 
 <body>
   <div class="game-wrap">
     <canvas id="game" width="640" height="640"></canvas>
+    <div class="audio-controls" aria-label="声音设置">
+      <button id="musicToggle" type="button" aria-pressed="true">音乐：开</button>
+      <button id="effectsToggle" type="button" aria-pressed="true">音效：开</button>
+    </div>
     <button class="home-button" id="homeButton" aria-label="Pause"></button>
   </div>
 
+  <script src="game-audio.js"></script>
   <script src="levels.js"></script>
   <script src="character-stats.js"></script>
   <script>
@@ -166,7 +188,7 @@
     const CHASE_SPEED_MULTIPLIER = 1.3;
     const EXTREME_CHASE_SPEED_MULTIPLIER = 1.1;
     const PORTAL_REENTRY_COOLDOWN_FRAMES = 4;
-    const DEBUG_MODE = false;
+    const DEBUG_MODE = true;
     const UNLOCKED_LEVEL_STORAGE_KEY = "newjeansGameUnlockedLevel";
     const ENEMY_SPEED_VALUES = {
       slow: 1.5,
@@ -1856,6 +1878,7 @@
         timer: LASER_DURATION
       };
 
+      gameAudio.laser();
       lasers.push(laser);
       laserCooldown = getCurrentLevelLaserCooldownFrames();
 
@@ -2510,11 +2533,16 @@
       if (playerMoved && canMoveTo(nextX, nextY)) {
         player.x = nextX;
         player.y = nextY;
+        gameAudio.step();
         updatePlayerPortal();
       }
 
       updateLasers();
       updateEnemies();
+      const chasingDistances = enemies
+        .filter(enemy => enemy.active && enemy.stunTimer <= 0 && enemy.behaviorState?.mode === "chasing")
+        .map(enemy => distance(enemy.x, enemy.y, player.x, player.y));
+      if (chasingDistances.length) gameAudio.chase(Math.min(...chasingDistances));
       collectStars();
       checkEnemyCollision();
       flushEnemySpawnQueue();
@@ -3134,6 +3162,7 @@
 
     function gameLoop(timestamp) {
       updateButtons();
+      gameAudio.setState(gameState);
 
       if (gameState === "playing") {
         updateCountdown(timestamp);
@@ -3145,6 +3174,7 @@
         lastCountdownTimestamp = null;
       }
 
+      gameAudio.setState(gameState);
       draw();
       requestAnimationFrame(gameLoop);
     }
